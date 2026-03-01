@@ -55,6 +55,7 @@ export interface NextAdapter {
     config: NextConfigComplete,
     ctx: {
       phase: PHASE_TYPE
+      nextVersion: string
     }
   ) => Promise<NextConfigComplete> | NextConfigComplete
   onBuildComplete?: (ctx: {
