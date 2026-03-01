@@ -13,7 +13,7 @@ import { detectLocale, detectDomainLocale, normalizeLocalePath } from './i18n'
 /**
  * Attempts to match a route against the current URL and conditions
  */
-function matchRoute(
+export function matchRoute(
   route: Route,
   url: URL,
   headers: Headers

@@ -1,4 +1,5 @@
-export { resolveRoutes } from './resolve-routes'
+export { matchRoute, resolveRoutes } from './resolve-routes'
+export { normalizeNextDataUrl, denormalizeNextDataUrl } from './next-data'
 export type {
   RouteHas,
   Route,
