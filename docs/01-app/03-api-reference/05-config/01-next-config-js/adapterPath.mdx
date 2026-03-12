@@ -147,6 +147,101 @@ const adapter = {
 module.exports = adapter
 ```
 
+## What an Adapter Must Provide
+
+Building a full adapter means covering several concerns beyond the `NextAdapter` hook itself. The adapter hooks (`modifyConfig`, `onBuildComplete`) give you the build outputs and metadata — but at runtime, your platform must handle serving, caching, and invoking those outputs. Here is a summary of what a complete adapter implementation needs to address:
+
+### Request routing
+
+Route incoming requests to the correct output (static file, prerendered page, dynamic handler, or middleware). The `routing` object from `onBuildComplete` provides all route phases and patterns. You can use the [`@next/routing`](https://www.npmjs.com/package/@next/routing) package to reproduce Next.js route matching, but you are responsible for middleware matcher evaluation, URL normalization, and translating middleware responses.
+
+See: [Request Lifecycle](#request-lifecycle), [Routing with `@next/routing`](#routing-with-nextrouting)
+
+### Static file serving
+
+Serve files from `outputs.staticFiles` (built assets, auto-statically optimized pages, public files). Files with an `immutableHash` can be served with long-lived cache headers (`Cache-Control: public, immutable`). Your platform typically serves these from a CDN or object store.
+
+See: [Static Files (`outputs.staticFiles`)](#static-files-outputsstaticfiles)
+
+### Handler invocation
+
+Invoke build output entrypoints for dynamic routes, API routes, and server-rendered pages. Handlers use different request/response primitives depending on the runtime — `IncomingMessage`/`ServerResponse` for Node.js, `Request`/`Response` for Edge. The adapter must provide a `waitUntil` function that keeps the process alive for background work (ISR revalidation, cache writes).
+
+See: [Invoking Entrypoints](#invoking-entrypoints)
+
+### Prerender / ISR cache
+
+Seed prerendered content from `outputs.prerenders` into your platform cache at build time. At runtime, serve cached responses, detect when entries become stale, and trigger background revalidation by invoking handlers for each entry in a revalidation group. Handle fallback modes for paths not prerendered at build time (blocking render, fallback HTML, or 404). Support draft mode bypass via `bypassToken`. For routes with Partial Pre-Rendering (PPR), serve the cached static shell immediately and resume rendering the dynamic parts by invoking the handler with the stored `postponedState`, streaming both as a single response.
+
+See: [Handling Prerenders](#handling-prerenders)
+
+### Cache handlers
+
+Provide custom cache backends for two separate caching systems:
+
+- **Data cache** (`cacheHandler`) — stores results from patched `fetch` calls and `unstable_cache`. Required if your platform needs shared cache across instances.
+- **"use cache" handlers** (`cacheHandlers`) — stores results from `"use cache"` directive functions. Supports multiple named handlers (`default`, `remote`, `static`).
+
+In the adapter model, response caching (ISR) is handled by the adapter through prerender outputs — the data cache handler only needs to cover fetch/data entries.
+
+See: [Cache Handlers](#cache-handlers)
+
+### Middleware execution
+
+Invoke the middleware entrypoint for requests matching middleware matchers. This includes normalizing URLs (stripping base path, handling `/_next/data` routes), evaluating matcher conditions (`sourceRegex`, `has`, `missing`), and translating the middleware `Response` into routing directives (rewrites, redirects, header modifications). The `responseToMiddlewareResult` helper from `@next/routing` handles response translation.
+
+See: [Middleware Matching](#middleware-matching)
+
+### Error page serving
+
+Serve 404 and 500 error pages when routes are not found or handlers throw errors. Error pages can appear in different output arrays depending on how they were built (static HTML, dynamic handler, or app router not-found page). With i18n, error pages are generated per-locale.
+
+See: [Serving Error Pages](#serving-error-pages)
+
+### Image optimization
+
+If your platform needs custom image optimization (resizing, format conversion, caching), you can configure it via `modifyConfig` or provide a platform-specific image loader. The default Next.js image optimization runs as part of the server — adapters for serverless or edge platforms may need to replace it with a platform-native solution.
+
+### Performance considerations
+
+The functional requirements above can be satisfied with general-purpose compute and storage — this is enough to ensure correctness. However, for production performance, Next.js features have specific characteristics that benefit from more specialized infrastructure.
+
+#### Routing and static serving at the edge
+
+Routing and static file serving are the most latency-sensitive operations since they affect every request. Ideally these run at the CDN edge rather than in a central origin:
+
+- **Static files** with `immutableHash` should be served directly from CDN cache with long-lived headers, never hitting origin.
+- **Route resolution** (matching `routing` rules, evaluating redirects and rewrites) can run in CDN workers to avoid a round-trip to origin for requests that resolve to cached content or redirects.
+- **Middleware** often modifies headers, rewrites URLs, or redirects — running it in a CDN worker avoids an extra hop before the request reaches the handler or cache.
+
+If your CDN does not support programmable workers, routing and middleware must run on origin compute. This is functionally correct but adds latency to every request.
+
+#### ISR cache storage requirements
+
+A basic key-value store can hold ISR responses, but Next.js ISR has specific semantics that a naive cache implementation handles poorly:
+
+- **Stale marking, not deletion.** When an entry becomes stale or a tag is invalidated, the entry must remain serveable (stale-while-revalidate). Caches that only support TTL-based expiry or deletion cannot express "stale but still serveable." The storage layer needs to track staleness separately from eviction.
+- **Tag-based invalidation.** `revalidateTag()` invalidates all entries associated with a tag. This requires either an index from tags to cache keys, or a tag versioning system where each entry's tags are checked against a global tag timestamp on read.
+- **Atomic group updates.** A prerender group (HTML, RSC, data routes) should update atomically — readers should not see a mix of old and new entries within the same group. Storage that supports batch writes or versioned reads helps here.
+- **Low-latency reads.** ISR serves cached content on the hot path. Cache reads should be fast — ideally served from edge locations or regional replicas rather than a single central store.
+
+A general-purpose database or object store (for example S3 or a SQL database) can satisfy correctness but may not meet latency or atomicity requirements at scale. Purpose-built caching infrastructure (regional KV stores, CDN-integrated cache APIs) is better suited.
+
+#### "use cache" and data cache distribution
+
+The `"use cache"` and data cache handlers face similar challenges in multi-instance deployments:
+
+- **Cross-instance consistency.** Tag invalidation via `revalidateTag()` must propagate to all instances. If each instance has an independent cache, stale data can be served after invalidation.
+- **Streaming-aware storage.** "use cache" entries are `ReadableStream<Uint8Array>` values that may still be streaming when `set()` is called. The storage backend must handle incomplete writes gracefully.
+
+#### Handler compute placement
+
+Route handlers and server-rendered pages require Node.js or Edge runtime compute. Placement options affect latency and cost:
+
+- **Regional compute** (single region) is simplest but adds latency for distant users.
+- **Multi-region compute** reduces latency but requires shared cache storage accessible from all regions — ISR and data caches must be replicated or centralized.
+- **Edge compute** (CDN workers) provides the lowest latency but typically has constraints on execution time, memory, and available APIs. Edge-runtime routes (`runtime: 'edge'`) are designed for these environments. Node.js-runtime routes require a full Node.js environment.
+
 ## API Reference
 
 ### `async modifyConfig(config, context)`
@@ -412,12 +507,105 @@ Additionally it receives `NEXT_TEST_DIR` and `NEXT_TEST_DEPLOY_URL` as environme
 
 The cleanup script can be used to clean up any resources created by the deploy script. It runs after the tests have completed.
 
+## Request Lifecycle
+
+When a request arrives, the adapter is responsible for routing it to the correct output. The following diagram shows the full request chain:
+
+```text
+Request arrives at adapter
+  │
+  ├─ 1. Normalize URL (base path, trailing slash)
+  │
+  ├─ 2. Route resolution (see "Routing" section below)
+  │   ├─ beforeMiddleware: config headers + redirects
+  │   ├─ Middleware: match + invoke (see "Middleware Matching")
+  │   ├─ beforeFiles: rewrites checked before filesystem
+  │   ├─ Filesystem match: static files, known pathnames
+  │   ├─ afterFiles: rewrites checked after filesystem
+  │   ├─ dynamicRoutes: dynamic route matching
+  │   ├─ onMatch: headers applied after match (e.g. Cache-Control: immutable)
+  │   └─ fallback: final rewrite fallback
+  │
+  ├─ 3. Determine handler from matched output
+  │   ├─ STATIC_FILE → serve file from disk or CDN
+  │   ├─ PRERENDER → serve cached response, revalidate in background (ISR)
+  │   │   └─ PPR → stream shell + resume rendering
+  │   ├─ APP_PAGE / APP_ROUTE → invoke handler(req, res, ctx)
+  │   ├─ PAGES / PAGES_API → invoke handler(req, res, ctx)
+  │   └─ No match → serve 404 (see "Serving Error Pages")
+  │
+  ├─ 4. Handle response
+  │   ├─ 200 → send response to client
+  │   ├─ 404 → serve /404 or /_not-found page (locale-aware)
+  │   ├─ 500 → serve /500 or /_error page
+  │   └─ onCacheEntryV2 → persist to platform cache
+  │
+  └─ 5. waitUntil promises resolve
+      └─ ISR revalidation, cache warming, logging
+         (platform must keep the process alive until all promises settle)
+```
+
+The `waitUntil` function passed to handler `ctx` allows the handler to schedule background work (such as ISR revalidation or cache writes) that should complete after the response is sent. The adapter's platform must keep the process alive until all registered promises settle.
+
 ## Routing with `@next/routing`
 
 You can use [`@next/routing`](https://www.npmjs.com/package/@next/routing) to reproduce Next.js route matching behavior with data from `onBuildComplete`.
 
 > [!NOTE]
 > `@next/routing` is experimental and will stabilize with the adapters API.
+
+### How routing works
+
+`resolveRoutes` evaluates routes in phases, in order. Each phase can short-circuit the chain by producing a redirect or rewrite, or it can pass through to the next phase. The phases are:
+
+1. **`beforeMiddleware`** — applies `headers` and `redirects` from `next.config.js`. A redirect short-circuits immediately.
+2. **Middleware** — the `invokeMiddleware` callback is called (see [Middleware Matching](#middleware-matching) below). Middleware can rewrite, redirect, or modify request headers.
+3. **`beforeFiles`** — rewrites checked before filesystem matching.
+4. **Filesystem match** — the resolved pathname is compared against the `pathnames` array (all known outputs). A match means a static file, page, or route handler exists for this path.
+5. **`afterFiles`** — rewrites checked after filesystem matching (only if no filesystem match).
+6. **`dynamicRoutes`** — dynamic route patterns like `/blog/[slug]`. Named and numbered regex groups are extracted as `routeMatches`.
+7. **`onMatch`** — headers applied after a successful match (for example `Cache-Control: public, immutable` for hashed static assets).
+8. **`fallback`** — final rewrite fallback routes.
+
+If no phase produces a match, the request has no matching output and the adapter should serve a 404 page.
+
+### `resolveRoutes` function signature
+
+```typescript
+import { resolveRoutes } from '@next/routing'
+
+type ResolveRoutesParams = {
+  url: URL
+  buildId: string
+  basePath: string
+  requestBody: ReadableStream
+  headers: Headers
+  pathnames: string[] // all known output pathnames
+  i18n?: NextConfig['i18n']
+  routes: {
+    beforeMiddleware: Array<Route>
+    beforeFiles: Array<Route>
+    afterFiles: Array<Route>
+    dynamicRoutes: Array<Route>
+    onMatch: Array<Route>
+    fallback: Array<Route>
+    shouldNormalizeNextData?: boolean
+  }
+  invokeMiddleware: (ctx: MiddlewareContext) => Promise<MiddlewareResult>
+}
+
+type ResolveRoutesResult = {
+  middlewareResponded?: boolean // middleware sent a response body directly
+  externalRewrite?: URL // rewrite to an external domain
+  redirect?: { url: URL; status: number }
+  matchedPathname?: string // which pathname from the provided list matched
+  resolvedHeaders?: Headers // accumulated response headers
+  status?: number
+  routeMatches?: Record<string, string> // extracted dynamic route parameters
+}
+```
+
+### Usage example
 
 ```typescript
 import { resolveRoutes } from '@next/routing'
@@ -441,47 +629,429 @@ const result = await resolveRoutes({
   routes: routing,
   invokeMiddleware: async (ctx) => {
     // platform-specific middleware invocation
+    // see "Middleware Matching" section below
     return {}
   },
 })
+
+if (result.redirect) {
+  // send HTTP redirect
+} else if (result.externalRewrite) {
+  // proxy to external URL
+} else if (result.middlewareResponded) {
+  // middleware already sent the response
+} else if (result.matchedPathname) {
+  // look up the output by matchedPathname and invoke its handler
+} else {
+  // no match — serve 404
+}
 ```
 
-## Implementing PPR in an Adapter
+### Middleware Matching
 
-For partially prerendered app routes, `onBuildComplete` gives you the data needed to seed and resume PPR:
+`resolveRoutes` calls your `invokeMiddleware` callback but does **not** evaluate middleware matchers for you. Your adapter is responsible for:
 
-- `outputs.prerenders[].fallback.filePath`: path to the generated fallback shell (for example HTML)
-- `outputs.prerenders[].fallback.postponedState`: serialized postponed state used to resume rendering
+1. **Testing matchers** — check `outputs.middleware.config.matchers` against the request URL
+2. **URL normalization** — normalize the URL before matching (strip base path, handle `/_next/data` URLs, extract locale)
+3. **Invoking the middleware entrypoint** — if matchers match, invoke the middleware handler and translate the result
 
-### 1. Seed shell + postponed state at build time
+#### Matcher evaluation
+
+Each matcher has a `sourceRegex` that should be tested against the normalized pathname, plus optional `has`/`missing` conditions:
+
+```typescript
+function matchesMiddleware(
+  pathname: string,
+  request: Request,
+  matchers: NonNullable<typeof outputs.middleware>['config']['matchers']
+): boolean {
+  if (!matchers) return true // no matchers means match all
+
+  for (const matcher of matchers) {
+    const regex = new RegExp(matcher.sourceRegex)
+    if (!regex.test(pathname)) continue
+
+    // Check `has` conditions (headers, cookies, query params)
+    if (matcher.has && !matchHasConditions(matcher.has, request)) continue
+
+    // Check `missing` conditions (must NOT be present)
+    if (matcher.missing && !matchMissingConditions(matcher.missing, request))
+      continue
+
+    return true
+  }
+
+  return false
+}
+```
+
+#### URL normalization before matching
+
+Before testing matchers, normalize the URL:
+
+```typescript
+function normalizeForMiddleware(
+  url: URL,
+  basePath: string,
+  buildId: string
+): string {
+  let pathname = url.pathname
+
+  // 1. Strip base path
+  if (basePath && pathname.startsWith(basePath)) {
+    pathname = pathname.slice(basePath.length) || '/'
+  }
+
+  // 2. Normalize /_next/data URLs
+  const dataPrefix = `/_next/data/${buildId}/`
+  if (pathname.startsWith(dataPrefix)) {
+    pathname = pathname.slice(dataPrefix.length - 1) // keep leading /
+    if (pathname.endsWith('.json')) {
+      pathname = pathname.slice(0, -'.json'.length) || '/'
+    }
+  }
+
+  return pathname
+}
+```
+
+#### `invokeMiddleware` callback contract
+
+The callback receives a `MiddlewareContext` and must return a `MiddlewareResult`:
+
+```typescript
+type MiddlewareContext = {
+  url: URL
+  headers: Headers
+  requestBody: ReadableStream
+}
+
+type MiddlewareResult = {
+  bodySent?: boolean // middleware sent a response directly
+  requestHeaders?: Headers // modified request headers (forwarded to handler)
+  responseHeaders?: Headers // headers to include in the response
+  redirect?: { url: URL; status: number }
+  rewrite?: URL // internal or external rewrite destination
+}
+```
+
+Your implementation should:
+
+1. Normalize the URL and test matchers
+2. If no matcher matches, return `{}` (passthrough)
+3. If matchers match, invoke the middleware entrypoint (edge runtime handler)
+4. Use `responseToMiddlewareResult` from `@next/routing` to convert the middleware `Response` into a `MiddlewareResult`
+
+#### `responseToMiddlewareResult` helper
+
+`@next/routing` exports `responseToMiddlewareResult` which handles all the middleware response header interpretation for you:
+
+```typescript
+import { responseToMiddlewareResult } from '@next/routing'
+
+// Converts a middleware Response into a MiddlewareResult by:
+// - Parsing x-middleware-rewrite → result.rewrite
+// - Parsing location header with 3xx status → result.redirect
+// - Parsing x-middleware-override-headers + x-middleware-request-* → result.requestHeaders
+// - Parsing x-middleware-set-cookie → result.requestHeaders
+// - Setting bodySent when x-middleware-refresh is present
+// - Filtering internal x-middleware-* headers from result.responseHeaders
+const result: MiddlewareResult = responseToMiddlewareResult(
+  response, // middleware Response
+  requestHeaders, // original request Headers
+  url // request URL
+)
+```
+
+#### Full `invokeMiddleware` example
+
+````typescript
+import { responseToMiddlewareResult } from '@next/routing'
+
+invokeMiddleware: async (ctx) => {
+  const pathname = normalizeForMiddleware(ctx.url, basePath, buildId)
+
+  if (
+    !matchesMiddleware(
+      pathname,
+      new Request(ctx.url, { headers: ctx.headers }),
+      outputs.middleware?.config.matchers
+    )
+  ) {
+    return {} // no match, passthrough
+  }
+
+  // Invoke the middleware handler (edge runtime)
+  const response = await middlewareHandler(
+    new Request(ctx.url, {
+      headers: ctx.headers,
+      body: ctx.requestBody,
+    })
+  )
+
+  // Convert middleware response headers into a MiddlewareResult
+  return responseToMiddlewareResult(response, ctx.headers, ctx.url)
+}
+
+## Handling Prerenders
+
+Prerender outputs (`outputs.prerenders`) represent routes that have pre-generated content at build time. The adapter is responsible for seeding this content into its platform cache at build time, serving it at request time, and handling revalidation.
+
+### Seeding prerenders at build time
+
+In `onBuildComplete`, iterate over `outputs.prerenders` and store each entry's fallback content in your platform cache:
 
 ```ts filename="my-adapter.ts"
 import { readFile } from 'node:fs/promises'
 
-async function seedPprEntries(outputs: AdapterOutputs) {
+async function seedPrerenders(outputs: AdapterOutputs) {
   for (const prerender of outputs.prerenders) {
     const fallback = prerender.fallback
-    if (!fallback?.filePath || !fallback.postponedState) continue
+    if (!fallback?.filePath) continue
 
-    const shell = await readFile(fallback.filePath, 'utf8')
+    const content = await readFile(fallback.filePath)
     await platformCache.set(prerender.pathname, {
-      shell,
-      postponedState: fallback.postponedState,
-      initialHeaders: fallback.initialHeaders,
-      initialStatus: fallback.initialStatus,
-      initialRevalidate: fallback.initialRevalidate,
-      initialExpiration: fallback.initialExpiration,
+      content,
+      headers: fallback.initialHeaders,
+      status: fallback.initialStatus,
+      revalidate: fallback.initialRevalidate,
+      expiration: fallback.initialExpiration,
+      postponedState: fallback.postponedState, // PPR only
+      groupId: prerender.groupId,
     })
   }
 }
 ```
 
-### 2. Runtime flow: serve cached shell and resume in background
+### Serving prerenders at request time
 
-At request time, you can stream a single response that is the concatenation of:
+The runtime flow depends on the prerender's configuration:
 
-1. cached HTML shell stream
-2. resumed render stream (generated after invoking `handler` with postponed state)
+```text
+Request for prerender path
+  │
+  ├─ Check bypassFor conditions and bypassToken
+  │   └─ If bypass → skip cache, invoke handler directly
+  │
+  ├─ Build cache key (pathname + allowQuery params + allowHeader headers)
+  │
+  ├─ Look up cached entry
+  │   ├─ Cache hit
+  │   │   ├─ Fresh (within initialRevalidate) → serve cached response
+  │   │   └─ Stale → serve cached response + revalidate in background
+  │   │
+  │   └─ Cache miss
+  │       ├─ parentFallbackMode === false → serve 404
+  │       ├─ parentFallbackMode === null → invoke handler, block until done
+  │       └─ parentFallbackMode === string → serve fallback HTML,
+  │                                          invoke handler in background
+  │
+  └─ After handler invocation → onCacheEntryV2 fires
+      └─ Persist updated response to platform cache
+```
+
+### Time-based revalidation (ISR)
+
+Each prerender's `fallback` object controls when it becomes stale:
+
+- **`initialRevalidate: number`** — seconds until the entry is stale. For example, `60` means revalidate after 60 seconds.
+- **`initialRevalidate: false`** — fully static, never revalidates. Serve the build-time content indefinitely.
+- **`initialExpiration: number`** — seconds until the entry expires completely and must not be served. This is typically longer than `initialRevalidate`.
+
+When an entry is **stale** (past `initialRevalidate` but before `initialExpiration`), the adapter should:
+
+1. **Serve the stale content immediately** to the client (stale-while-revalidate)
+2. **Trigger background revalidation** for all entries in the same `groupId` (see [Revalidation groups](#revalidation-groups-groupid))
+3. For each entry in the group, invoke its handler to generate a fresh response and cache the result
+4. Use `waitUntil` to keep the process alive until all revalidation requests complete
+5. Subsequent requests receive the fresh content
+
+When an entry is **expired** (past `initialExpiration`), it must not be served at all. Treat this as a cache miss and invoke the handler (blocking or with fallback, depending on `parentFallbackMode`).
+
+### On-demand revalidation (`revalidateTag` / `revalidatePath`)
+
+Users can trigger revalidation from Server Actions or Route Handlers by calling `revalidateTag(tag)` or `revalidatePath(path)`. When this happens:
+
+1. Next.js marks the affected tags as expired in its internal tags manifest
+2. On the next request, any cached entry whose tags include an expired tag is treated as stale
+3. The stale-while-revalidate flow kicks in: serve stale, revalidate in background
+
+From the adapter's perspective, on-demand revalidation is transparent — the handler invocation and `onCacheEntryV2` callback work the same way as time-based revalidation. The adapter does not need to handle `revalidateTag`/`revalidatePath` calls directly; they are processed internally by Next.js during handler execution.
+
+However, if your platform runs multiple instances, tag expiration state must be shared across them. The fetch/data cache handler's `revalidateTag()` method and the "use cache" handler's `updateTags()` method are called when tags are invalidated — use these to propagate invalidation to your distributed cache backend (see [Cache Handlers](#cache-handlers)).
+
+### On-demand path generation (dynamic routes not prerendered at build time)
+
+Not all paths for a dynamic route are prerendered at build time. For example, a blog with thousands of posts may only prerender the most recent ones via `generateStaticParams` (App Router) or `getStaticPaths` (Pages Router). Paths not listed are generated on demand at request time.
+
+**How the adapter identifies these paths:**
+
+- Build-time prerendered paths appear in `outputs.prerenders` with specific pathnames (for example `/blog/hello-world`)
+- The parent dynamic route handler appears in `outputs.appPages` or `outputs.pages` with a pattern pathname (for example `/blog/[slug]`)
+- Each prerender's `parentOutputId` links back to the handler that can generate new instances
+- The `routing.dynamicRoutes` array contains regex patterns for matching incoming URLs to dynamic routes
+
+**When a request arrives for an unprerendered path:**
+
+1. Routing resolves to a dynamic route pattern (for example `/blog/[slug]`)
+2. No cached entry exists for the specific path (for example `/blog/new-post`)
+3. The adapter checks `parentFallbackMode` on the prerender config for that dynamic route:
+   - **`false`** → serve 404 (no on-demand generation allowed)
+   - **`null`** → invoke the handler and block until the response is ready
+   - **`string`** → serve the fallback HTML immediately, invoke the handler in the background
+   - **`undefined`** (App Router) → invoke the handler and block until the response is ready
+4. After generation, `onCacheEntryV2` fires with the new content
+5. The adapter persists the result and serves it for future requests, applying the same `initialRevalidate` / `initialExpiration` timing as build-time prerenders
+
+**Matching dynamic routes to handlers:**
+
+The adapter needs to map an incoming URL to the correct handler. Use `routing.dynamicRoutes` from `onBuildComplete` to match URLs against dynamic patterns, then look up the handler in `outputs.appPages` or `outputs.pages` by the matched route's pathname:
+
+```typescript
+function findDynamicHandler(
+  url: string,
+  dynamicRoutes: Array<Route>,
+  outputs: AdapterOutputs
+) {
+  for (const route of dynamicRoutes) {
+    const match = new RegExp(route.sourceRegex).exec(url)
+    if (!match) continue
+
+    // Find the handler for this dynamic route
+    const handler =
+      outputs.appPages.find((p) => p.pathname === route.destination) ||
+      outputs.pages.find((p) => p.pathname === route.destination)
+
+    if (handler) {
+      return { handler, match, route }
+    }
+  }
+  return null
+}
+```
+
+### Revalidation groups (`groupId`)
+
+Prerenders with the same `groupId` must revalidate together. A single dynamic route like `/blog/[slug]` generates multiple prerender entries that share a `groupId`:
+
+- The HTML route (`/blog/hello-world`)
+- The data/RSC route (`/blog/hello-world.rsc` or `/_next/data/BUILD_ID/blog/hello-world.json`)
+- Prefetch segment data routes (for PPR)
+
+When any entry in a group becomes stale, the adapter should revalidate **all entries in the group**. Each entry requires a separate handler invocation to generate its specific response (HTML, RSC payload, JSON data, etc.). The adapter should invoke the handler for each entry's pathname and cache the response it produces.
+
+```text
+Entry /blog/hello-world becomes stale
+  │
+  ├─ Find all entries with same groupId:
+  │   ├─ /blog/hello-world       (HTML)
+  │   ├─ /blog/hello-world.rsc   (RSC payload)
+  │   └─ /_next/data/BUILD_ID/blog/hello-world.json (Pages data)
+  │
+  ├─ For each entry, invoke the parent handler:
+  │   ├─ handler(req(/blog/hello-world), res)       → cache HTML response
+  │   ├─ handler(req(/blog/hello-world.rsc), res)   → cache RSC response
+  │   └─ handler(req(/_next/data/.../hello-world.json), res) → cache data
+  │
+  └─ Each invocation produces a complete HTTP response
+      that the adapter caches independently
+```
+
+The `onCacheEntryV2` callback fires once per handler invocation, giving the adapter access to the cache entry's metadata (cache control, status, headers). However, the actual response bytes are written to the `res` object — the adapter should capture them from there to persist in its platform cache.
+
+### Cache key construction
+
+Use `allowQuery` and `allowHeader` from the prerender's config to build cache keys:
+
+- **`allowQuery: string[]`** — only these query parameters affect the cache key. For example, if `allowQuery` is `['slug']`, then `/blog?slug=foo&utm=bar` and `/blog?slug=foo` share the same cache entry. An empty `[]` means no query parameters affect the cache key.
+- **`allowHeader: string[]`** — only these headers affect the cache key. Prevents unrelated headers like `user-agent` from fragmenting the cache.
+
+### Fallback modes (`parentFallbackMode`)
+
+This field determines how the adapter should handle requests for paths that were **not** prerendered at build time (for example, a new blog post added after the build):
+
+- **`false`** — `fallback: false` in `getStaticPaths`. Only build-time paths are valid. Serve 404 for any path not in the prerender list.
+- **`null`** — `fallback: 'blocking'`. Invoke the handler and block until the response is ready. Cache the result for future requests.
+- **`string`** — `fallback: true`. Serve the fallback HTML page (at the path in this string) immediately while generating the actual page in the background. Cache the result for future requests.
+- **`undefined`** — App Router routes (no explicit fallback concept). Dynamic paths are generated on demand and cached.
+
+### Draft mode bypass
+
+The `bypassToken` field is a secret token for draft/preview mode. When a request includes the header `X-Prerender-Revalidate: <bypassToken>`, the adapter should skip the cache and invoke the handler directly for a fresh render. Never expose this token in public responses.
+
+Additionally, `bypassFor` is an array of `RouteHas` conditions (matching headers, cookies, or query params) that also bypass the cache. This is used for server actions and similar dynamic behavior.
+
+### `onCacheEntryV2` callback
+
+When the adapter invokes a handler, it can pass an `onCacheEntryV2` callback via `requestMeta`. This callback fires once per handler invocation when the response cache entry is resolved. It provides cache metadata for the response — the adapter can use this to determine caching parameters for the response it captures from the handler.
+
+> [!NOTE]
+>
+> - `requestMeta.onCacheEntry` still works, but is deprecated.
+> - Prefer `requestMeta.onCacheEntryV2`.
+
+The callback receives a `ResponseCacheEntry` keyed by the canonical route path. This entry contains metadata and rendered content for **one specific response** (not the entire prerender group). To revalidate a group, invoke the handler for each entry's pathname separately — each invocation triggers its own `onCacheEntryV2` call.
+
+```ts filename="my-adapter.ts"
+// Revalidate a single entry in a prerender group
+async function revalidateEntry(
+  entryPathname: string,
+  handler: Handler,
+  waitUntil: (p: Promise<void>) => void,
+  cachedEntry?: { postponedState?: string }
+) {
+  // Create a request/response pair for this specific entry
+  const req = createRequest(entryPathname)
+  const res = createResponse()
+
+  await handler(req, res, {
+    waitUntil,
+    requestMeta: {
+      postponed: cachedEntry?.postponedState, // PPR only
+      onCacheEntryV2: async (cacheEntry, meta) => {
+        // cacheEntry contains metadata for this single response:
+        // - cacheEntry.cacheControl: revalidation timing
+        // - cacheEntry.value?.kind: 'APP_PAGE', 'PAGES', 'APP_ROUTE', etc.
+        // - cacheEntry.isStale: whether this entry was stale
+        //
+        // The actual response bytes are written to `res` —
+        // capture them there for your platform cache.
+
+        await platformCache.set(entryPathname, {
+          body: res.getBody(),
+          headers: res.getHeaders(),
+          status: res.statusCode,
+          cacheControl: cacheEntry.cacheControl,
+        })
+
+        // Return false: Next.js continues its normal response flow.
+        // Return true: adapter already handled the response (short-circuit).
+        return false
+      },
+    },
+  })
+}
+
+// Revalidate all entries in a group
+async function revalidateGroup(
+  groupId: number,
+  prerenders: AdapterOutputs['prerenders'],
+  handler: Handler,
+  waitUntil: (p: Promise<void>) => void
+) {
+  const groupEntries = prerenders.filter((p) => p.groupId === groupId)
+
+  await Promise.all(
+    groupEntries.map((entry) =>
+      revalidateEntry(entry.pathname, handler, waitUntil)
+    )
+  )
+}
+```
+
+### Partial Pre-Rendering (PPR)
+
+For routes with `renderingMode: 'PARTIALLY_STATIC'`, the build produces a shell (static HTML) and a `postponedState` used to resume rendering the dynamic parts at request time. The adapter can stream a single response that concatenates the cached shell and the resumed render:
 
 ```text
 Client
@@ -498,7 +1068,7 @@ Adapter Router
   |
   |-- invoke handler(req, res, { requestMeta: { postponed } })
   |   -------------------------------------> Entrypoint (handler)
-  |   <------------------------------------- resumed chunks/cache entry
+  |   <------------------------------------- resumed chunks / cache entry
   |
   |-- append resumed chunks to resumedStream
   |
@@ -506,56 +1076,9 @@ Adapter Router
       [shell bytes........][resumed bytes........]
 ```
 
-### 3. Update cache with `requestMeta.onCacheEntryV2`
+When `pprChain.headers` is present (containing `{'x-nextjs-resume': '1'}`), forward these headers when invoking the handler so the server knows to resume from postponed state.
 
-`requestMeta.onCacheEntryV2` is called when a response cache entry is looked up or generated. Use it to persist updated shell/postponed data.
-
-> [!NOTE]
->
-> - `requestMeta.onCacheEntry` still works, but is deprecated.
-> - Prefer `requestMeta.onCacheEntryV2`.
-> - If your adapter uses an internal `onCacheCallback` abstraction, wire it to `requestMeta.onCacheEntryV2`.
-
-```ts filename="my-adapter.ts"
-await handler(req, res, {
-  waitUntil,
-  requestMeta: {
-    postponed: cachedPprEntry?.postponedState,
-    onCacheEntryV2: async (cacheEntry, meta) => {
-      if (cacheEntry.value?.kind === 'APP_PAGE') {
-        const html =
-          cacheEntry.value.html &&
-          typeof cacheEntry.value.html.toUnchunkedString === 'function'
-            ? cacheEntry.value.html.toUnchunkedString()
-            : null
-
-        await platformCache.set(meta.url || req.url || '/', {
-          shell: html,
-          postponedState: cacheEntry.value.postponed,
-          headers: cacheEntry.value.headers,
-          status: cacheEntry.value.status,
-          cacheControl: cacheEntry.cacheControl,
-        })
-      }
-
-      // Return true only if your adapter already wrote the response itself.
-      return false
-    },
-  },
-})
-```
-
-```text
-Entrypoint (handler)
-  | onCacheEntryV2(cacheEntry, { url })
-  v
-requestMeta.onCacheEntryV2 callback
-  |
-  |-- if APP_PAGE ---> persist html + postponedState + headers ---> Platform Cache
-  |
-  '-- return false: continue normal Next.js response flow
-      return true:  adapter already handled response (short-circuit)
-```
+Routes with `partialFallback: true` serve an incomplete shell that should be upgraded to a full response in the background. The adapter should treat these as temporary and trigger revalidation.
 
 ## Invoking Entrypoints
 
@@ -825,6 +1348,236 @@ Each route entry can include:
 - `status`: Redirect status code
 - `priority`: Internal route priority flag
 
+## Cache Handlers
+
+Next.js has two separate caching systems, each with its own handler interface. Deployment platforms typically need to provide custom implementations for both to use a shared cache backend (for example Redis, DynamoDB, or a platform-specific KV store).
+
+### Fetch / data cache handler (`cacheHandler`)
+
+This handler is used by patched `fetch` calls and `unstable_cache`. It is configured with the singular `cacheHandler` option:
+
+```js filename="next.config.js"
+module.exports = {
+  cacheHandler: require.resolve('./my-fetch-cache-handler.js'),
+}
+```
+
+Or via the `NEXT_CACHE_HANDLER_PATH` environment variable.
+
+> [!NOTE]
+> In the adapter model, **response caching and ISR are handled by the adapter itself** through prerender outputs and `onCacheEntryV2` (see [Implementing PPR in an Adapter](#implementing-ppr-in-an-adapter)). The fetch cache handler only needs to cover **data cache entries** (patched `fetch` results and `unstable_cache` values).
+>
+> When a prerender group revalidates, all grouped responses are rendered in the same process. Next.js keeps response cache entries in memory during this process, so grouped prerenders can share results without external storage. The adapter then receives the updated responses via `onCacheEntryV2` and persists them to its platform cache. This means the fetch cache handler does **not** need to store or serve response cache entries — that concern is moved entirely to the adapter's prerender output handling.
+
+The handler is a class that extends the built-in `CacheHandler`:
+
+```typescript
+import type {
+  CacheHandler,
+  CacheHandlerContext,
+  CacheHandlerValue,
+} from 'next/dist/server/lib/incremental-cache'
+
+export default class MyFetchCacheHandler extends CacheHandler {
+  constructor(ctx: CacheHandlerContext) {
+    super(ctx)
+    // Initialize your cache backend connection
+  }
+
+  async get(
+    cacheKey: string,
+    ctx: GetContext
+  ): Promise<CacheHandlerValue | null> {
+    // Look up cached fetch/data value by key
+    // Return { value, lastModified } or null
+  }
+
+  async set(
+    cacheKey: string,
+    data: IncrementalCacheValue | null,
+    ctx: SetContext
+  ): Promise<void> {
+    // Store or delete the cached fetch/data value
+  }
+
+  async revalidateTag(tags: string | string[]): Promise<void> {
+    // Invalidate data cache entries associated with the given tags
+  }
+
+  resetRequestCache(): void {
+    // Clear any per-request in-memory cache (called between requests)
+  }
+}
+```
+
+### "use cache" handlers (`cacheHandlers`)
+
+This is a separate handler interface for the `"use cache"` directive. It is configured with the plural `cacheHandlers` option, which supports multiple named handlers:
+
+```js filename="next.config.js"
+module.exports = {
+  cacheHandlers: {
+    default: require.resolve('./my-default-cache-handler.js'),
+    remote: require.resolve('./my-remote-cache-handler.js'),
+  },
+  cacheMaxMemorySize: 50 * 1024 * 1024, // 50 MB (0 to disable in-memory cache)
+}
+```
+
+Or via environment variables: `NEXT_DEFAULT_CACHE_HANDLER_PATH`, `NEXT_REMOTE_CACHE_HANDLER_PATH`, `NEXT_STATIC_CACHE_HANDLER_PATH`.
+
+Each handler implements the `CacheHandler` interface from `next/dist/server/lib/cache-handlers/types`:
+
+```typescript
+import type {
+  CacheHandler,
+  CacheEntry,
+} from 'next/dist/server/lib/cache-handlers/types'
+
+const handler: CacheHandler = {
+  async get(
+    cacheKey: string,
+    softTags: string[]
+  ): Promise<CacheEntry | undefined> {
+    // Return cached entry or undefined
+    // Must respect soft tag expiration
+  },
+
+  async set(
+    cacheKey: string,
+    pendingEntry: Promise<CacheEntry>
+  ): Promise<void> {
+    // Store the entry. Note: the entry may still be streaming
+    // (its value ReadableStream may not be fully written yet).
+    // Await the promise before reading the stream.
+  },
+
+  async refreshTags(): Promise<void> {
+    // Called periodically before starting a new request.
+    // Sync local tag state with a remote tags service if applicable.
+  },
+
+  async getExpiration(tags: string[]): Promise<number> {
+    // Return the maximum revalidation timestamp for the given tags.
+    // Return 0 if none were ever revalidated.
+  },
+
+  async updateTags(
+    tags: string[],
+    durations?: { expire?: number }
+  ): Promise<void> {
+    // Called when tags are revalidated (e.g. via revalidateTag()).
+    // Update your tags manifest accordingly.
+  },
+}
+
+export default handler
+```
+
+The `CacheEntry` shape:
+
+```typescript
+interface CacheEntry {
+  value: ReadableStream<Uint8Array> // cached data (may be partial if stream errors)
+  tags: string[] // cache tags (excluding soft tags)
+  stale: number // client-facing stale duration (seconds)
+  timestamp: number // when the entry was created (milliseconds)
+  expire: number // how long the entry can be served (seconds)
+  revalidate: number // how long until background revalidation (seconds)
+}
+```
+
+### Differences between the two cache systems
+
+| Aspect            | Data cache (`cacheHandler`)                      | "use cache" (`cacheHandlers`)                        |
+| ----------------- | ------------------------------------------------ | ---------------------------------------------------- |
+| Config key        | `cacheHandler` (singular, string path)           | `cacheHandlers` (plural, object with named handlers) |
+| Used by           | patched `fetch`, `unstable_cache`                | `"use cache"` directive                              |
+| Interface         | Class extending `CacheHandler`                   | Object implementing `CacheHandler` interface         |
+| Data format       | `IncrementalCacheValue` (HTML, JSON, route data) | `CacheEntry` with `ReadableStream<Uint8Array>`       |
+| Multiple handlers | No (single handler)                              | Yes (`default`, `remote`, `static`, or custom names) |
+
+## Serving Error Pages
+
+When a route handler returns a 404 status or throws an error, the adapter must serve the appropriate error page. Error pages can appear in different output arrays depending on how they were built.
+
+### Where error pages appear in outputs
+
+**404 pages:**
+
+- **`outputs.staticFiles`** — if the 404 page was auto-statically optimized to HTML (no custom `_app` with `getInitialProps`). With i18n, each locale gets a separate entry (for example `/en/404`, `/de/404`).
+- **`outputs.pages`** — if `/pages/404.js` has `getStaticProps` or the app has a custom `_app` with `getInitialProps`, the 404 page is a dynamic handler.
+- **`outputs.prerenders`** — in the App Router, `/_not-found` may appear as a prerender entry (unless a static 404 already exists).
+- **`outputs.appPages`** — if `app/not-found.tsx` exists, the `/_not-found/page` entry is available as a dynamic handler.
+
+**500 pages:**
+
+- **`outputs.staticFiles`** — if the 500 page was auto-statically optimized.
+- **`outputs.pages`** — if `/pages/500.js` or `/pages/_error.js` exists as a dynamic handler.
+
+### When to serve error pages
+
+**404 — No matching route:**
+
+When `resolveRoutes` produces no `matchedPathname` and no redirect, serve the 404 page.
+
+**404 — Handler returns `notFound: true`:**
+
+A Pages Router handler using `getStaticProps` can return `{ notFound: true }`. When this happens:
+
+- For `_next/data` requests (JSON): respond with `{"notFound":true}` and status 404
+- For HTML requests: serve the 404 page with status 404
+
+**404 — Dynamic route with `fallback: false`:**
+
+If a dynamic route's prerender has `parentFallbackMode` set to `false`, only the paths generated at build time are valid. Any other path should receive a 404.
+
+**500 — Handler throws an error:**
+
+When a handler throws during rendering, serve the 500 page. The fallback chain is:
+
+1. Serve `/500` if it exists (check `outputs.staticFiles` then `outputs.pages`)
+2. Fall back to `/_error` page
+3. If neither exists, return a plain "Internal Server Error" response
+
+### i18n and localized error pages
+
+With i18n configured, error pages are generated per-locale. The build produces entries like `/en/404.html`, `/de/404.html`, etc. in `outputs.staticFiles`.
+
+When serving an error page:
+
+1. Determine the locale from the request (from the URL path prefix, cookie, or `Accept-Language` header)
+2. Serve the locale-specific error page if available (for example `/de/404`)
+3. Fall back to the default locale's error page
+
+```typescript
+function getErrorPage(
+  statusCode: 404 | 500,
+  locale: string | undefined,
+  defaultLocale: string,
+  outputs: AdapterOutputs
+) {
+  const page = `/${statusCode}`
+
+  // Try locale-specific static error page
+  if (locale) {
+    const localized = outputs.staticFiles.find(
+      (f) => f.pathname === `/${locale}${page}`
+    )
+    if (localized) return localized
+  }
+
+  // Try default locale
+  const defaultPage = outputs.staticFiles.find(
+    (f) => f.pathname === `/${defaultLocale}${page}` || f.pathname === page
+  )
+  if (defaultPage) return defaultPage
+
+  // Fall back to dynamic handler in outputs.pages
+  return outputs.pages.find((p) => p.pathname === page)
+}
+```
+
 ## Use Cases
 
 Common use cases for adapters include:
@@ -835,3 +1588,4 @@ Common use cases for adapters include:
 - **Custom Bundling**: Package outputs in platform-specific formats
 - **Build Validation**: Ensure outputs meet specific requirements
 - **Route Generation**: Use processed route information to generate platform-specific routing configs
+````
