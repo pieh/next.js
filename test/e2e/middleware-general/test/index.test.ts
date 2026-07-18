@@ -615,7 +615,9 @@ describe('Middleware Runtime', () => {
       expect('error' in payload).toBe(true)
       expect(payload.error.name).toBe('AbortError')
       // AbortError messages differ depending on the runtime
-      expect(payload.error.message).toMatch(/(This|The) operation was aborted/)
+      expect(payload.error.message).toMatch(
+        /((This|The) operation was aborted)|(The signal has been aborted)/
+      )
     })
 
     it(`should validate & parse request url from any route`, async () => {
