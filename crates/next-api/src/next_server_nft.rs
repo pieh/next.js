@@ -32,14 +32,17 @@ enum ServerNftType {
 
 #[turbo_tasks::function]
 pub async fn next_server_nft_assets(project: Vc<Project>) -> Result<Vc<OutputAssets>> {
-    if *project.next_config().is_using_adapter().await? {
+    let is_standalone = *project.next_config().is_standalone().await?;
+
+    if *project.next_config().is_using_adapter().await? && !is_standalone {
         // When using an adapter, we don't need to generate any server NFTs as build-complete
-        // doesn't use them at all.
+        // doesn't use them at all. An adapter can still be combined with `output: 'standalone'`
+        // though, and copyTracedFiles() needs next-server.js.nft.json, so only skip this when
+        // standalone output isn't requested.
         return Ok(Vc::cell(vec![]));
     }
 
     let has_next_support = *project.ci_has_next_support().await?;
-    let is_standalone = *project.next_config().is_standalone().await?;
 
     let minimal = ResolvedVc::upcast(
         ServerNftJsonAsset::new(project, ServerNftType::Minimal)

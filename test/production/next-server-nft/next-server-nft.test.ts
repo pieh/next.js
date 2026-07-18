@@ -722,5 +722,57 @@ async function readNormalizedNFT(next, name) {
         `)
       })
     })
+
+    describe('with adapters and output:standalone', () => {
+      const { next, skipped } = nextTestSetup({
+        files: __dirname,
+        dependencies: {
+          typescript: '5.9.2',
+        },
+        nextConfig: {
+          output: 'standalone',
+          adapterPath: path.join(__dirname, './my-adapter.mjs'),
+        },
+      })
+
+      if (skipped) {
+        return
+      }
+
+      // An adapter alone doesn't need any server NFTs, but `output: 'standalone'` does:
+      // copyTracedFiles() reads next-server.js.nft.json to assemble the standalone output. Combining
+      // both must not skip it.
+      it('should still generate next-server.js.nft.json', async () => {
+        expect(await next.hasFile('.next/next-server.js.nft.json')).toBe(true)
+
+        const trace = await readNormalizedNFT(
+          next,
+          '.next/next-server.js.nft.json'
+        )
+
+        // Not a full inline snapshot: the standalone-only describe above already pins the exact
+        // contents. Assert on the entry points that are specific to standalone output, which are
+        // the reason this file has to exist at all (see ServerNftType::Full entries).
+        expect(trace).toEqual(
+          expect.arrayContaining([
+            '/node_modules/next/dist/server/next-server.js',
+            '/node_modules/next/dist/server/lib/start-server.js',
+            '/node_modules/next/dist/server/next.js',
+            '/node_modules/next/dist/server/require-hook.js',
+          ])
+        )
+      })
+
+      // The above only checks the trace file. This checks the thing it feeds: copyTracedFiles()
+      // must be able to assemble a runnable standalone server from it.
+      it('should copy the traced server files into .next/standalone', async () => {
+        expect(
+          await next.hasFile(
+            '.next/standalone/node_modules/next/dist/server/next-server.js'
+          )
+        ).toBe(true)
+        expect(await next.hasFile('.next/standalone/server.js')).toBe(true)
+      })
+    })
   }
 )
