@@ -73,6 +73,8 @@ export class NextDeployInstance extends NextInstance {
       NEXT_TEST_DIR: this.testDir,
       // Pass test-specific env vars
       ...this.env,
+      // Pass test-specific env vars in clear way to ensure they are set for deployment
+      NEXT_TEST_ENV: JSON.stringify({ ...this.env }),
     }
 
     const deployRes = await execa(deployScriptPath, [], {
