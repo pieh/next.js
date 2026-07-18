@@ -1,5 +1,5 @@
 import { isNextDev, isNextStart, nextTestSetup } from 'e2e-utils'
-import { retry } from 'next-test-utils'
+import { expectDirectives, retry } from 'next-test-utils'
 
 describe('SSG notFound revalidate', () => {
   describe.each(['static', 'dynamic'])('%s 404', (type) => {
@@ -93,8 +93,11 @@ describe('SSG notFound revalidate', () => {
         let res = await next.fetch('/fallback-blocking/hello')
         let $ = await next.render$('/fallback-blocking/hello')
 
-        expect(res.headers.get('cache-control')).toBe(
-          isNextDev ? 'no-store' : 's-maxage=1, stale-while-revalidate=31535999'
+        expectDirectives(
+          res.headers.get('cache-control'),
+          isNextDev
+            ? ['no-store']
+            : ['s-maxage=1', 'stale-while-revalidate=31535999']
         )
         expect(res.status).toBe(404)
         expect(JSON.parse($('#props').text()).notFound).toBe(true)
@@ -102,10 +105,11 @@ describe('SSG notFound revalidate', () => {
         await retry(async () => {
           res = await next.fetch('/fallback-blocking/hello')
           $ = await next.render$('/fallback-blocking/hello')
-          expect(res.headers.get('cache-control')).toBe(
+          expectDirectives(
+            res.headers.get('cache-control'),
             isNextDev
-              ? 'no-store'
-              : 's-maxage=1, stale-while-revalidate=31535999'
+              ? ['no-store']
+              : ['s-maxage=1', 'stale-while-revalidate=31535999']
           )
           expect(res.status).toBe(200)
           const p = JSON.parse($('#props').text())
@@ -120,10 +124,11 @@ describe('SSG notFound revalidate', () => {
           const r = await next.fetch('/fallback-blocking/hello')
           const $r = await next.render$('/fallback-blocking/hello')
           const p = JSON.parse($r('#props').text())
-          expect(r.headers.get('cache-control')).toBe(
+          expectDirectives(
+            r.headers.get('cache-control'),
             isNextDev
-              ? 'no-store'
-              : 's-maxage=1, stale-while-revalidate=31535999'
+              ? ['no-store']
+              : ['s-maxage=1', 'stale-while-revalidate=31535999']
           )
           expect(r.status).toBe(200)
           expect(p.found).toBe(true)
@@ -139,10 +144,11 @@ describe('SSG notFound revalidate', () => {
 
         await retry(async () => {
           const res = await next.fetch('/fallback-true/world')
-          expect(res.headers.get('cache-control')).toBe(
+          expectDirectives(
+            res.headers.get('cache-control'),
             isNextDev
-              ? 'no-store'
-              : 's-maxage=1, stale-while-revalidate=31535999'
+              ? ['no-store']
+              : ['s-maxage=1', 'stale-while-revalidate=31535999']
           )
           expect(res.status).toBe(404)
           const $ = await next.render$('/fallback-true/world')
@@ -153,10 +159,11 @@ describe('SSG notFound revalidate', () => {
           const res = await next.fetch('/fallback-true/world')
           const $ = await next.render$('/fallback-true/world')
           const props = JSON.parse($('#props').text())
-          expect(res.headers.get('cache-control')).toBe(
+          expectDirectives(
+            res.headers.get('cache-control'),
             isNextDev
-              ? 'no-store'
-              : 's-maxage=1, stale-while-revalidate=31535999'
+              ? ['no-store']
+              : ['s-maxage=1', 'stale-while-revalidate=31535999']
           )
           expect(res.status).toBe(200)
           expect(props.found).toBe(true)
@@ -171,10 +178,11 @@ describe('SSG notFound revalidate', () => {
           const r = await next.fetch('/fallback-true/world')
           const $r = await next.render$('/fallback-true/world')
           const props3 = JSON.parse($r('#props').text())
-          expect(r.headers.get('cache-control')).toBe(
+          expectDirectives(
+            r.headers.get('cache-control'),
             isNextDev
-              ? 'no-store'
-              : 's-maxage=1, stale-while-revalidate=31535999'
+              ? ['no-store']
+              : ['s-maxage=1', 'stale-while-revalidate=31535999']
           )
           expect(r.status).toBe(200)
           expect(props3.found).toBe(true)

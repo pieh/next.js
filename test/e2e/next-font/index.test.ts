@@ -1,6 +1,6 @@
 import cheerio from 'cheerio'
 import { FileRef, nextTestSetup } from 'e2e-utils'
-import { renderViaHTTP } from 'next-test-utils'
+import { expectDirectives, renderViaHTTP } from 'next-test-utils'
 import { join } from 'path'
 
 const mockedGoogleFontResponses = require.resolve(
@@ -61,9 +61,11 @@ describe('next/font', () => {
       const link = $('[rel="preload"][as="font"]').attr('href')
       expect(link).toBeDefined()
       const res = await next.fetch(link)
-      expect(res.headers.get('cache-control')).toBe(
-        'public, max-age=31536000, immutable'
-      )
+      expectDirectives(res.headers.get('cache-control'), [
+        'public',
+        'max-age=31536000',
+        'immutable',
+      ])
     })
   }
 

@@ -2,7 +2,7 @@ import { nextTestSetup, isNextStart } from 'e2e-utils'
 import { splitResponseWithPPRSentinel } from 'e2e-utils/ppr'
 import { links } from './components/links'
 import cheerio from 'cheerio'
-import { getCacheHeader, retry } from 'next-test-utils'
+import { expectDirectives, getCacheHeader, retry } from 'next-test-utils'
 import { computeCacheBustingSearchParam } from 'next/dist/shared/lib/router/utils/cache-busting-search-param'
 
 type Page = {
@@ -65,21 +65,6 @@ const addCacheBustingSearchParam = async (
   const url = new URL(pathname, 'http://localhost')
   url.searchParams.set('_rsc', cacheKey)
   return url.pathname + url.search
-}
-
-/**
- * Expects that the cache-control header contains the given directives in any
- * order.
- *
- * @param header The cache-control header to check.
- * @param directives The directives to expect.
- */
-const expectDirectives = (header: string, directives: string[]) => {
-  const split = header.split(',').map((directive) => directive.trim())
-  for (const directive of directives) {
-    expect(split).toContain(directive)
-  }
-  expect(split.length).toEqual(directives.length)
 }
 
 // TODO(NAR-423): Migrate to Cache Components.
@@ -190,19 +175,31 @@ describe.skip('ppr-full', () => {
 
           const cacheControl = res.headers.get('cache-control')
           if (isNextDeploy) {
-            expect(cacheControl).toEqual('public, max-age=0, must-revalidate')
+            expectDirectives(cacheControl, [
+              'public',
+              'max-age=0',
+              'must-revalidate',
+            ])
           } else if (isNextDev) {
-            expect(cacheControl).toEqual('no-store')
+            expectDirectives(cacheControl, ['no-store'])
           } else if (dynamic === false || dynamic === 'force-static') {
-            expect(cacheControl).toEqual(
+            expectDirectives(
+              cacheControl,
               revalidate === undefined
-                ? `s-maxage=31536000`
-                : `s-maxage=${revalidate}, stale-while-revalidate=${31536000 - revalidate}`
+                ? [`s-maxage=31536000`]
+                : [
+                    `s-maxage=${revalidate}`,
+                    `stale-while-revalidate=${31536000 - revalidate}`,
+                  ]
             )
           } else {
-            expect(cacheControl).toEqual(
-              'private, no-cache, no-store, max-age=0, must-revalidate'
-            )
+            expectDirectives(cacheControl, [
+              'private',
+              'no-cache',
+              'no-store',
+              'max-age=0',
+              'must-revalidate',
+            ])
           }
 
           // The cache header is not relevant in development and is not
@@ -527,13 +524,13 @@ describe.skip('ppr-full', () => {
           )
 
           if (isNextStart) {
-            expect(res.headers.get('cache-control')).toEqual(
-              's-maxage=31536000'
-            )
+            expectDirectives(res.headers.get('cache-control'), [
+              's-maxage=31536000',
+            ])
           }
 
           if (isNextDeploy) {
-            expectDirectives(res.headers.get('cache-control') || '', [
+            expectDirectives(res.headers.get('cache-control'), [
               'public',
               'max-age=0',
               'must-revalidate',
@@ -595,16 +592,20 @@ describe.skip('ppr-full', () => {
             expect(res.headers.get('content-type')).toEqual('text/x-component')
 
             if (isNextDeploy) {
-              expectDirectives(res.headers.get('cache-control') || '', [
+              expectDirectives(res.headers.get('cache-control'), [
                 'public',
                 'max-age=0',
                 'must-revalidate',
               ])
             } else {
-              expect(res.headers.get('cache-control')).toEqual(
+              expectDirectives(
+                res.headers.get('cache-control'),
                 revalidate === undefined
-                  ? `s-maxage=31536000`
-                  : `s-maxage=${revalidate}, stale-while-revalidate=${31536000 - revalidate}`
+                  ? [`s-maxage=31536000`]
+                  : [
+                      `s-maxage=${revalidate}`,
+                      `stale-while-revalidate=${31536000 - revalidate}`,
+                    ]
               )
             }
 
@@ -649,7 +650,7 @@ describe.skip('ppr-full', () => {
           })
           expect(res.status).toEqual(200)
           expect(res.headers.get('content-type')).toEqual('text/x-component')
-          expectDirectives(res.headers.get('cache-control') || '', [
+          expectDirectives(res.headers.get('cache-control'), [
             'private',
             'no-store',
             'no-cache',
