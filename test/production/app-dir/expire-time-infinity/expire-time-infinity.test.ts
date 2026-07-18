@@ -1,4 +1,5 @@
 import { nextTestSetup } from 'e2e-utils'
+import { expectDirectives } from 'next-test-utils'
 
 describe('expire-time-infinity', () => {
   if (process.env.__NEXT_CACHE_COMPONENTS === 'true') {
@@ -24,7 +25,10 @@ describe('expire-time-infinity', () => {
       // The stale-while-revalidate window is derived from the expireTime. An
       // Infinity expireTime must resolve to a finite window instead of the
       // invalid `stale-while-revalidate=Infinity`.
-      expect(cacheControl).toMatch(/s-maxage=60, stale-while-revalidate=\d+$/)
+      expectDirectives(cacheControl, [
+        's-maxage=60',
+        /^stale-while-revalidate=\d+$/,
+      ])
     } finally {
       await next.stop()
     }

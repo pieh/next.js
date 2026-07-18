@@ -1,4 +1,5 @@
 import { nextTestSetup, isNextDev, type Playwright } from 'e2e-utils'
+import { expectDirectives } from 'next-test-utils'
 import cheerio from 'cheerio'
 
 // The fixture page intentionally renders an uncached `await setTimeout(0)`
@@ -92,9 +93,11 @@ import cheerio from 'cheerio'
         const res = await fetch(url)
         expect(res.status).toBe(200)
         expect(res.headers.get('content-type')).toStartWith('image/')
-        expect(res.headers.get('cache-control')).toBe(
-          'public, max-age=315360000, immutable'
-        )
+        expectDirectives(res.headers.get('cache-control'), [
+          'public',
+          'max-age=315360000',
+          'immutable',
+        ])
       })
 
       it('Should use immutable cache-control header even when unoptimized', async () => {
@@ -108,9 +111,11 @@ import cheerio from 'cheerio'
         const res = await fetch(url)
         expect(res.status).toBe(200)
         expect(res.headers.get('content-type')).toStartWith('image/')
-        expect(res.headers.get('cache-control')).toBe(
-          'public, max-age=31536000, immutable'
-        )
+        expectDirectives(res.headers.get('cache-control'), [
+          'public',
+          'max-age=31536000',
+          'immutable',
+        ])
       })
     }
 

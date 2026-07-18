@@ -1,4 +1,5 @@
 import { nextTestSetup, isNextDev, type Playwright } from 'e2e-utils'
+import { expectDirectives } from 'next-test-utils'
 
 describe('Build Error Tests for basePath', () => {
   const { next } = nextTestSetup({
@@ -68,9 +69,11 @@ describe('Static Image Component Tests for basePath', () => {
       `document.getElementById("basic-static").src`
     )
     const res = await fetch(url)
-    expect(res.headers.get('cache-control')).toBe(
-      'public, max-age=315360000, immutable'
-    )
+    expectDirectives(res.headers.get('cache-control'), [
+      'public',
+      'max-age=315360000',
+      'immutable',
+    ])
   })
 
   if (!isNextDev) {
@@ -83,9 +86,11 @@ describe('Static Image Component Tests for basePath', () => {
         `document.getElementById("static-unoptimized").src`
       )
       const res = await fetch(url)
-      expect(res.headers.get('cache-control')).toBe(
-        'public, max-age=31536000, immutable'
-      )
+      expectDirectives(res.headers.get('cache-control'), [
+        'public',
+        'max-age=31536000',
+        'immutable',
+      ])
     })
   }
 

@@ -1,6 +1,7 @@
 import cheerio from 'cheerio'
 import cookie from 'cookie'
 import { nextTestSetup } from 'e2e-utils'
+import { expectDirectives } from 'next-test-utils'
 
 function getData(html: string) {
   const $ = cheerio.load(html)
@@ -154,9 +155,13 @@ describe('Test Draft Mode', () => {
       const html = await res.text()
 
       const { nextData, draft } = getData(html)
-      expect(res.headers.get('cache-control')).toBe(
-        'private, no-cache, no-store, max-age=0, must-revalidate'
-      )
+      expectDirectives(res.headers.get('cache-control'), [
+        'private',
+        'no-cache',
+        'no-store',
+        'max-age=0',
+        'must-revalidate',
+      ])
       expect(nextData).toMatchObject({ isFallback: false })
       expect(draft).toBe('true')
     })
@@ -166,9 +171,13 @@ describe('Test Draft Mode', () => {
       const res = await next.fetch(url, getOpts())
       const json = await res.json()
 
-      expect(res.headers.get('cache-control')).toBe(
-        'private, no-cache, no-store, max-age=0, must-revalidate'
-      )
+      expectDirectives(res.headers.get('cache-control'), [
+        'private',
+        'no-cache',
+        'no-store',
+        'max-age=0',
+        'must-revalidate',
+      ])
       expect(json).toMatchObject({
         pageProps: {
           draftMode: 'true',

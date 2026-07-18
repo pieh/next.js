@@ -3,6 +3,7 @@ import cheerio from 'cheerio'
 import fs, { existsSync } from 'fs-extra'
 import globOriginal from 'glob'
 import {
+  expectDirectives,
   renderViaHTTP,
   waitFor,
   getPageFileFromPagesManifest,
@@ -634,9 +635,11 @@ describe('Production Usage', () => {
 
       responses.forEach((res) => {
         try {
-          expect(res.headers.get('Cache-Control')).toBe(
-            'public, max-age=31536000, immutable'
-          )
+          expectDirectives(res.headers.get('Cache-Control'), [
+            'public',
+            'max-age=31536000',
+            'immutable',
+          ])
         } catch (err) {
           err.message = res.url + ' ' + err.message
           throw err
@@ -652,9 +655,13 @@ describe('Production Usage', () => {
       )
 
       expect(res.status).toBe(404)
-      expect(res.headers.get('Cache-Control')).toBe(
-        'private, no-cache, no-store, max-age=0, must-revalidate'
-      )
+      expectDirectives(res.headers.get('Cache-Control'), [
+        'private',
+        'no-cache',
+        'no-store',
+        'max-age=0',
+        'must-revalidate',
+      ])
     })
 
     it('should block special pages', async () => {

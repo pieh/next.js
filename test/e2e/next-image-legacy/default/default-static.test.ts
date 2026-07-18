@@ -5,6 +5,7 @@ import {
   isNextStart,
   type Playwright,
 } from 'e2e-utils'
+import { expectDirectives } from 'next-test-utils'
 import cheerio from 'cheerio'
 
 describe('Build Error Tests', () => {
@@ -81,9 +82,11 @@ describe('Static Image Component Tests', () => {
         `document.getElementById("basic-static").src`
       )
       const res = await fetch(url)
-      expect(res.headers.get('cache-control')).toBe(
-        'public, max-age=315360000, immutable'
-      )
+      expectDirectives(res.headers.get('cache-control'), [
+        'public',
+        'max-age=315360000',
+        'immutable',
+      ])
     }
   )
   ;(isNextStart ? it : it.skip)(
@@ -97,9 +100,11 @@ describe('Static Image Component Tests', () => {
         `document.getElementById("static-unoptimized").src`
       )
       const res = await fetch(url)
-      expect(res.headers.get('cache-control')).toBe(
-        'public, max-age=31536000, immutable'
-      )
+      expectDirectives(res.headers.get('cache-control'), [
+        'public',
+        'max-age=31536000',
+        'immutable',
+      ])
     }
   )
 

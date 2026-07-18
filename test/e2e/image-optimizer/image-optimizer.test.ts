@@ -1,6 +1,6 @@
 import { join } from 'path'
 import { nextTestSetup, isNextDev, isNextStart } from 'e2e-utils'
-import { check } from 'next-test-utils'
+import { check, expectDirectives } from 'next-test-utils'
 import { cleanImagesDir, expectWidth, fsToJson } from './util'
 
 function toQueryString(query: Record<string, any>): string {
@@ -327,9 +327,11 @@ describe('Image Optimizer', () => {
           opts
         )
         expect(res.status).toBe(200)
-        expect(res.headers.get('Cache-Control')).toBe(
-          'public, max-age=14400, must-revalidate'
-        )
+        expectDirectives(res.headers.get('Cache-Control'), [
+          'public',
+          'max-age=14400',
+          'must-revalidate',
+        ])
         expect(res.headers.get('Content-Disposition')).toBe(
           'attachment; filename="test.webp"'
         )
@@ -360,9 +362,11 @@ describe('Image Optimizer', () => {
           opts
         )
         expect(res.status).toBe(200)
-        expect(res.headers.get('Cache-Control')).toBe(
-          'public, max-age=14400, must-revalidate'
-        )
+        expectDirectives(res.headers.get('Cache-Control'), [
+          'public',
+          'max-age=14400',
+          'must-revalidate',
+        ])
         expect(res.headers.get('Content-Disposition')).toBe(
           'attachment; filename="test.webp"'
         )
@@ -477,9 +481,11 @@ describe('Image Optimizer', () => {
         )
         expect(res.status).toBe(200)
         expect(res.headers.get('Content-Type')).toBe('image/webp')
-        expect(res.headers.get('Cache-Control')).toBe(
-          'public, max-age=31536000, must-revalidate'
-        )
+        expectDirectives(res.headers.get('Cache-Control'), [
+          'public',
+          'max-age=31536000',
+          'must-revalidate',
+        ])
         expect(res.headers.get('Vary')).toBe('Accept')
         expect(res.headers.get('Content-Disposition')).toBe(
           'attachment; filename="next-js-bg.webp"'

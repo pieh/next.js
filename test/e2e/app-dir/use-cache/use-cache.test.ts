@@ -4,6 +4,7 @@ import {
   waitForNoErrorToast,
   retry,
   waitFor,
+  expectDirectives,
 } from 'next-test-utils'
 import type { Playwright } from 'e2e-utils'
 import stripAnsi from 'strip-ansi'
@@ -621,17 +622,19 @@ describe('use-cache', () => {
     it('should send an SWR cache-control header based on the revalidate and expire values', async () => {
       let response = await next.fetch('/cache-life')
 
-      expect(response.headers.get('cache-control')).toBe(
+      expectDirectives(
+        response.headers.get('cache-control'),
         // revalidate is set to 100, expire is set to 300 => SWR 200
-        's-maxage=100, stale-while-revalidate=200'
+        ['s-maxage=100', 'stale-while-revalidate=200']
       )
 
       response = await next.fetch('/cache-fetch')
 
-      expect(response.headers.get('cache-control')).toBe(
+      expectDirectives(
+        response.headers.get('cache-control'),
         // revalidate is set to 900, expire is one year (31536000, default
         // expireTime) => SWR 31535100
-        's-maxage=900, stale-while-revalidate=31535100'
+        ['s-maxage=900', 'stale-while-revalidate=31535100']
       )
     })
 

@@ -5,6 +5,7 @@ import cheerio from 'cheerio'
 import { FileRef, nextTestSetup } from 'e2e-utils'
 import {
   createNowRouteMatches,
+  expectDirectives,
   fetchViaHTTP,
   findPort,
   initNextServerScript,
@@ -179,9 +180,10 @@ describe('required server files app router', () => {
       })
     )
     expect(res.status).toBe(200)
-    expect(res.headers.get('cache-control')).toBe(
-      's-maxage=3600, stale-while-revalidate=31532400'
-    )
+    expectDirectives(res.headers.get('cache-control'), [
+      's-maxage=3600',
+      'stale-while-revalidate=31532400',
+    ])
   })
 
   it('should not fail caching', async () => {

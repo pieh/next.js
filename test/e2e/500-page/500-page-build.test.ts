@@ -1,4 +1,5 @@
 import { isNextDev, nextTestSetup } from 'e2e-utils'
+import { expectDirectives } from 'next-test-utils'
 
 // This test exercises `next build` outputs and `next start` behaviour, so it
 // is meaningless in dev mode where the dev server bypasses production build
@@ -88,9 +89,13 @@ export default page
     try {
       const res = await next.fetch('/err')
       expect(res.status).toBe(500)
-      expect(res.headers.get('cache-control')).toBe(
-        'private, no-cache, no-store, max-age=0, must-revalidate'
-      )
+      expectDirectives(res.headers.get('cache-control'), [
+        'private',
+        'no-cache',
+        'no-store',
+        'max-age=0',
+        'must-revalidate',
+      ])
     } finally {
       await next.stop()
     }

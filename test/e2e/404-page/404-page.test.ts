@@ -1,5 +1,5 @@
 import { nextTestSetup, isNextDev, isNextStart } from 'e2e-utils'
-import { retry } from 'next-test-utils'
+import { expectDirectives, retry } from 'next-test-utils'
 
 describe('404 Page Support', () => {
   const { next } = nextTestSetup({
@@ -216,12 +216,20 @@ export default page
     const res404 = await next.fetch('/404')
     const resNext = await next.fetch('/_next/abc')
 
-    expect(res404.headers.get('Cache-Control')).toBe(
-      'private, no-cache, no-store, max-age=0, must-revalidate'
-    )
-    expect(resNext.headers.get('Cache-Control')).toBe(
-      'private, no-cache, no-store, max-age=0, must-revalidate'
-    )
+    expectDirectives(res404.headers.get('Cache-Control'), [
+      'private',
+      'no-cache',
+      'no-store',
+      'max-age=0',
+      'must-revalidate',
+    ])
+    expectDirectives(resNext.headers.get('Cache-Control'), [
+      'private',
+      'no-cache',
+      'no-store',
+      'max-age=0',
+      'must-revalidate',
+    ])
   })
 
   it('should not cache for custom 404 page with gssp and revalidate enabled', async () => {
@@ -240,12 +248,20 @@ export default page
     const res404 = await next.fetch('/404')
     const resNext = await next.fetch('/_next/abc')
 
-    expect(res404.headers.get('Cache-Control')).toBe(
-      'private, no-cache, no-store, max-age=0, must-revalidate'
-    )
-    expect(resNext.headers.get('Cache-Control')).toBe(
-      'private, no-cache, no-store, max-age=0, must-revalidate'
-    )
+    expectDirectives(res404.headers.get('Cache-Control'), [
+      'private',
+      'no-cache',
+      'no-store',
+      'max-age=0',
+      'must-revalidate',
+    ])
+    expectDirectives(resNext.headers.get('Cache-Control'), [
+      'private',
+      'no-cache',
+      'no-store',
+      'max-age=0',
+      'must-revalidate',
+    ])
   })
 
   it('should not cache for custom 404 page without gssp', async () => {
@@ -257,8 +273,12 @@ export default page
     const resNext = await next.fetch('/_next/abc')
 
     expect(res404.headers.get('Cache-Control')).toBe(null)
-    expect(resNext.headers.get('Cache-Control')).toBe(
-      'private, no-cache, no-store, max-age=0, must-revalidate'
-    )
+    expectDirectives(resNext.headers.get('Cache-Control'), [
+      'private',
+      'no-cache',
+      'no-store',
+      'max-age=0',
+      'must-revalidate',
+    ])
   })
 })

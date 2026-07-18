@@ -2123,6 +2123,28 @@ export const getCacheHeader = (curRes: Response) =>
   // favor generic header
   curRes.headers.get('x-nextjs-cache') || curRes.headers.get('x-vercel-cache')
 
+/**
+ * Expects that the cache-control header contains the given directives in any
+ * order.
+ *
+ * @param header The cache-control header to check.
+ * @param directives The directives to expect.
+ */
+export const expectDirectives = (
+  header: string | null,
+  directives: Array<string | RegExp>
+) => {
+  const split = (header ?? '').split(',').map((directive) => directive.trim())
+  for (const directive of directives) {
+    if (directive instanceof RegExp) {
+      expect(split).toContainEqual(expect.stringMatching(directive))
+    } else {
+      expect(split).toContain(directive)
+    }
+  }
+  expect(split.length).toEqual(directives.length)
+}
+
 export function getDeploymentId(appDir: string, isDev: boolean) {
   let requiredServerFiles: RequiredServerFilesManifest | undefined
   if (!isDev) {

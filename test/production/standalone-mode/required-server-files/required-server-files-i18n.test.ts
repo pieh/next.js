@@ -6,6 +6,7 @@ import { FileRef, nextTestSetup } from 'e2e-utils'
 import {
   check,
   createNowRouteMatches,
+  expectDirectives,
   fetchViaHTTP,
   findPort,
   initNextServerScript,
@@ -200,9 +201,10 @@ describe('required server files i18n', () => {
       })
     )
     expect(res.status).toBe(200)
-    expect(res.headers.get('cache-control')).toBe(
-      's-maxage=1, stale-while-revalidate=31535999'
-    )
+    expectDirectives(res.headers.get('cache-control'), [
+      's-maxage=1',
+      'stale-while-revalidate=31535999',
+    ])
 
     await waitFor(2000)
     await next.patchFile('standalone/data.txt', 'hide')
@@ -216,9 +218,10 @@ describe('required server files i18n', () => {
       })
     )
     expect(res2.status).toBe(404)
-    expect(res2.headers.get('cache-control')).toBe(
-      's-maxage=1, stale-while-revalidate=31535999'
-    )
+    expectDirectives(res2.headers.get('cache-control'), [
+      's-maxage=1',
+      'stale-while-revalidate=31535999',
+    ])
   })
 
   it('should set correct SWR headers with notFound gssp', async () => {
@@ -233,9 +236,10 @@ describe('required server files i18n', () => {
       })
     )
     expect(res.status).toBe(200)
-    expect(res.headers.get('cache-control')).toBe(
-      's-maxage=1, stale-while-revalidate=31535999'
-    )
+    expectDirectives(res.headers.get('cache-control'), [
+      's-maxage=1',
+      'stale-while-revalidate=31535999',
+    ])
 
     await next.patchFile('standalone/data.txt', 'hide')
 
@@ -250,9 +254,10 @@ describe('required server files i18n', () => {
     await next.patchFile('standalone/data.txt', 'show')
 
     expect(res2.status).toBe(404)
-    expect(res2.headers.get('cache-control')).toBe(
-      's-maxage=1, stale-while-revalidate=31535999'
-    )
+    expectDirectives(res2.headers.get('cache-control'), [
+      's-maxage=1',
+      'stale-while-revalidate=31535999',
+    ])
   })
 
   it('should render SSR page correctly', async () => {
