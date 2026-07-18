@@ -1,6 +1,7 @@
 import { nextTestSetup } from 'e2e-utils'
 import {
   check,
+  expectDirectives,
   expectVaryHeaderToContain,
   retry,
   waitFor,
@@ -38,9 +39,13 @@ describe('app dir - basic', () => {
       for (const path of ['/catch-all/first', '/ssr']) {
         const res = await next.fetch(path)
         expect(res.status).toBe(200)
-        expect(res.headers.get('Cache-Control')).toBe(
-          'private, no-cache, no-store, max-age=0, must-revalidate'
-        )
+        expectDirectives(res.headers.get('Cache-Control'), [
+          'private',
+          'no-cache',
+          'no-store',
+          'max-age=0',
+          'must-revalidate',
+        ])
       }
     })
   }

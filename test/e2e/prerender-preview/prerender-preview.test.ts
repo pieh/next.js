@@ -2,6 +2,7 @@ import { nextTestSetup } from 'e2e-utils'
 import cheerio from 'cheerio'
 import cookie from 'cookie'
 import qs from 'querystring'
+import { expectDirectives } from 'next-test-utils'
 
 function getData(html: string) {
   const $ = cheerio.load(html)
@@ -137,9 +138,13 @@ describe('Prerender Preview Mode', () => {
 
     const { nextData, pre, routerData } = getData(html)
     if (isNextStart) {
-      expect(res.headers.get('cache-control')).toBe(
-        'private, no-cache, no-store, max-age=0, must-revalidate'
-      )
+      expectDirectives(res.headers.get('cache-control'), [
+        'private',
+        'no-cache',
+        'no-store',
+        'max-age=0',
+        'must-revalidate',
+      ])
     }
     expect(nextData).toMatchObject({ isFallback: false, isPreview: true })
     expect(pre).toBe('true and {"lets":"goooo"}')
@@ -154,9 +159,13 @@ describe('Prerender Preview Mode', () => {
       )
       const json = await res.json()
 
-      expect(res.headers.get('cache-control')).toBe(
-        'private, no-cache, no-store, max-age=0, must-revalidate'
-      )
+      expectDirectives(res.headers.get('cache-control'), [
+        'private',
+        'no-cache',
+        'no-store',
+        'max-age=0',
+        'must-revalidate',
+      ])
       expect(json).toMatchObject({
         pageProps: {
           preview: true,
