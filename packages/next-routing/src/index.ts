@@ -1,4 +1,4 @@
-export { resolveRoutes } from './resolve-routes'
+export { matchRoute, resolveRoutes } from './resolve-routes'
 export type {
   RouteHas,
   Route,
