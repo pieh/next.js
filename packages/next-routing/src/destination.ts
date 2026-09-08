@@ -7,30 +7,34 @@ export function replaceDestination(
   regexMatches: RegExpMatchArray | null,
   hasCaptures: Record<string, string>
 ): string {
-  let result = destination
+  const values = new Map<string, string>()
 
-  // Replace numbered captures from regex ($1, $2, etc.)
+  // `has` captures first: a regex group of the same name takes precedence
+  for (const [name, value] of Object.entries(hasCaptures)) {
+    values.set(name, value)
+  }
+
   if (regexMatches) {
-    // Replace numbered groups (skip index 0 which is the full match)
+    // Numbered groups, skipping index 0 which is the full match
     for (let i = 1; i < regexMatches.length; i++) {
-      const value = regexMatches[i] ?? ''
-      result = result.replace(new RegExp(`\\$${i}`, 'g'), value)
+      values.set(String(i), regexMatches[i] ?? '')
     }
 
-    // Replace named groups ($name)
     if (regexMatches.groups) {
       for (const [name, value] of Object.entries(regexMatches.groups)) {
-        result = result.replace(new RegExp(`\\$${name}`, 'g'), value ?? '')
+        values.set(name, value ?? '')
       }
     }
   }
 
-  // Replace named captures from has conditions
-  for (const [name, value] of Object.entries(hasCaptures)) {
-    result = result.replace(new RegExp(`\\$${name}`, 'g'), value)
-  }
-
-  return result
+  // One pass over the whole destination: replacing placeholders one at a time would let a name
+  // that is a prefix of another one corrupt the longer one (`$nxtPid` inside `$nxtPid2`, `$1`
+  // inside `$10`), and would re-substitute placeholder-looking text coming from a value.
+  // Unknown placeholders are left untouched, as before.
+  return destination.replace(
+    /\$([A-Za-z_][A-Za-z0-9_]*|[1-9][0-9]*)/g,
+    (placeholder, name: string) => values.get(name) ?? placeholder
+  )
 }
 
 /**
