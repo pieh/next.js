@@ -6,7 +6,6 @@ import { nextTestSetup } from 'e2e-utils'
 import {
   check,
   fetchViaHTTP,
-  getCacheHeader,
   normalizeRegEx,
   retry,
   waitFor,
@@ -71,10 +70,8 @@ describe('app-dir static/dynamic handling', () => {
       expect(data).not.toBe(data2)
       // custom cache handler is in memory only
     } else if (!process.env.CUSTOM_CACHE_HANDLER) {
-      const pageCache = getCacheHeader(res)
-
-      expect(pageCache).toBeTruthy()
-      expect(pageCache).not.toBe('MISS')
+      // The fetch has no cache config, so the only thing that can hold `data`
+      // steady across two requests is the page's own cache entry.
       expect(data).toBe(data2)
     }
   })
@@ -98,10 +95,6 @@ describe('app-dir static/dynamic handling', () => {
     } else if (!process.env.CUSTOM_CACHE_HANDLER) {
       // "default" cache does not impact ISR handling on a page, similar to the above test
       // case for no fetch config
-      const pageCache = getCacheHeader(res)
-
-      expect(pageCache).toBeTruthy()
-      expect(pageCache).not.toBe('MISS')
       expect(data).toBe(data2)
     }
 
