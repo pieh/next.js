@@ -1,20 +1,32 @@
 import { nextTestSetup } from 'e2e-utils'
 import cheerio from 'cheerio'
 import { join } from 'path'
-import { getCacheHeader } from 'next-test-utils'
 
 describe('app-root-param-getters - generateStaticParams', () => {
-  const { next } = nextTestSetup({
+  const { next, isNextDev } = nextTestSetup({
     files: join(__dirname, 'fixtures', 'generate-static-params'),
   })
 
   it('should be statically prerenderable', async () => {
     const params = { lang: 'en', locale: 'us' }
-    const response = await next.fetch(`/${params.lang}/${params.locale}`)
-    expect(response.status).toBe(200)
-    expect(getCacheHeader(response)).toBeOneOf(['HIT', 'PRERENDER'])
-    const $ = cheerio.load(await response.text())
+    const load = async () => {
+      const response = await next.fetch(`/${params.lang}/${params.locale}`)
+      expect(response.status).toBe(200)
+      return cheerio.load(await response.text())
+    }
+
+    const $ = await load()
     expect($('p').text()).toBe(`hello world ${JSON.stringify(params)}`)
+
+    if (isNextDev) return
+
+    // Reading root params must not make the page dynamic: the shell is rendered
+    // once and reused, while the part behind the Suspense boundary is rendered
+    // for each request. Both tokens are random, so a shell that was re-rendered
+    // would bring a new value with it.
+    const $2 = await load()
+    expect($2('#shell-token').text()).toBe($('#shell-token').text())
+    expect($2('#request-token').text()).not.toBe($('#request-token').text())
   })
 
   it('should be part of the static shell', async () => {
