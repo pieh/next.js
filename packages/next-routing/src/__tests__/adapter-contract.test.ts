@@ -41,6 +41,8 @@ const emptyRoutes = {
   fallback: [],
 }
 
+const i18n = { defaultLocale: 'en', locales: ['en', 'fr'] }
+
 describe('output matching like next start', () => {
   it('matches outputs regardless of a trailing slash', async () => {
     const result = await resolveRoutes(
@@ -218,6 +220,160 @@ describe('data requests', () => {
   })
 })
 
+describe('i18n like next start', () => {
+  const pageMatcher = {
+    sourceRegex:
+      '^(?:\\/((?!_next\\/)[^/.]{1,}))\\/((?!api|_next\\/static).*)$',
+  }
+
+  it('adds the default locale to data requests before matching middleware', async () => {
+    const invokeMiddleware = jest.fn(async () => ({}))
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/_next/data/BUILD_ID/test.json'),
+        i18n,
+        routes: {
+          ...emptyRoutes,
+          shouldNormalizeNextData: true,
+          middlewareMatchers: [pageMatcher],
+        },
+        pathnames: ['/_next/data/BUILD_ID/en/test.json'],
+        invokeMiddleware,
+      })
+    )
+    expect(invokeMiddleware).toHaveBeenCalledTimes(1)
+    expect(result.resolvedPathname).toBe('/_next/data/BUILD_ID/en/test.json')
+    expect(result.invocation?.requestMeta.locale).toBe('en')
+  })
+
+  it('does not run an exclusion matcher on API routes', async () => {
+    const invokeMiddleware = jest.fn(async () => ({}))
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/api/hello'),
+        i18n,
+        routes: { ...emptyRoutes, middlewareMatchers: [pageMatcher] },
+        pathnames: [{ pathname: '/api/hello', type: 'PAGES_API' }],
+        invokeMiddleware,
+      })
+    )
+    expect(invokeMiddleware).not.toHaveBeenCalled()
+    expect(result.resolvedPathname).toBe('/api/hello')
+  })
+
+  it('runs an /api matcher on API routes', async () => {
+    const invokeMiddleware = jest.fn(async () => ({}))
+    await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/api/hello'),
+        i18n,
+        routes: {
+          ...emptyRoutes,
+          middlewareMatchers: [
+            {
+              sourceRegex: '^(?:\\/((?!_next\\/)[^/.]{1,}))\\/api(?:\\/(.*))?$',
+            },
+          ],
+        },
+        pathnames: [{ pathname: '/api/hello', type: 'PAGES_API' }],
+        invokeMiddleware,
+      })
+    )
+    expect(invokeMiddleware).toHaveBeenCalledTimes(1)
+  })
+
+  it('404s an explicitly locale-prefixed API request', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/fr/api/hello'),
+        i18n,
+        pathnames: [{ pathname: '/api/hello', type: 'PAGES_API' }],
+      })
+    )
+    expect(result.resolvedPathname).toBeUndefined()
+    expect(result.invocationTarget).toBeUndefined()
+  })
+
+  it('serves the root for the default locale instead of redirecting', async () => {
+    const removeTrailingSlash = {
+      sourceRegex: '^(?:\\/((?:[^/]+\\/)*[^/]+))\\/$',
+      headers: { Location: '/$1' },
+      status: 308,
+    }
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/'),
+        i18n,
+        routes: { ...emptyRoutes, beforeMiddleware: [removeTrailingSlash] },
+        pathnames: ['/en'],
+      })
+    )
+    expect(result.status).toBeUndefined()
+    expect(result.redirect).toBeUndefined()
+    expect(result.resolvedPathname).toBe('/en')
+  })
+
+  it('serves the root with trailingSlash instead of redirecting', async () => {
+    const addTrailingSlash = {
+      sourceRegex:
+        '^(?:\\/((?!\\.well-known(?:\\/.*)?)(?:[^/]+\\/)*[^/\\.]+))$',
+      headers: { Location: '/$1/' },
+      status: 308,
+    }
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/'),
+        i18n,
+        trailingSlash: true,
+        routes: { ...emptyRoutes, beforeMiddleware: [addTrailingSlash] },
+        pathnames: ['/en'],
+      })
+    )
+    expect(result.status).toBeUndefined()
+    expect(result.resolvedPathname).toBe('/en')
+  })
+
+  it('redirects to the detected locale like next start', async () => {
+    const withoutSlash = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/?x=1'),
+        headers: new Headers({ 'accept-language': 'fr' }),
+        i18n,
+      })
+    )
+    expect(withoutSlash.redirect?.url.pathname).toBe('/fr')
+    expect(withoutSlash.redirect?.url.search).toBe('?x=1')
+    const withSlash = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/'),
+        headers: new Headers({ 'accept-language': 'fr' }),
+        i18n,
+        trailingSlash: true,
+      })
+    )
+    expect(withSlash.redirect?.url.pathname).toBe('/fr/')
+  })
+
+  it('reports the locale of a middleware rewrite target', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/about'),
+        i18n,
+        routes: {
+          ...emptyRoutes,
+          middlewareMatchers: [{ sourceRegex: '^.*$' }],
+        },
+        pathnames: ['/about'],
+        invokeMiddleware: async () => ({
+          rewrite: new URL('https://example.com/fr/about'),
+        }),
+      })
+    )
+    expect(result.resolvedPathname).toBe('/about')
+    expect(result.invocation?.requestMeta.locale).toBe('fr')
+  })
+})
+
 describe('invocation', () => {
   it('reports params by name, decoded, with catch-all segments as arrays', async () => {
     const result = await resolveRoutes(
@@ -259,6 +415,30 @@ describe('invocation', () => {
       })
     )
     expect(result.invocation?.requestMeta.params).toEqual({ 'post-id': '42' })
+  })
+
+  it('reports params for localized data requests and optional catch-alls', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/_next/data/BUILD_ID/fr/docs.json'),
+        i18n,
+        routes: {
+          ...emptyRoutes,
+          shouldNormalizeNextData: true,
+          dynamicRoutes: [
+            {
+              sourceRegex:
+                '^/(?<nextLocale>[^/]+?)/docs(?:/(?<nxtPslug>.+?))?$',
+              destination: '/$nextLocale/docs/[[...slug]]',
+            },
+          ],
+        },
+        pathnames: ['/docs/[[...slug]]'],
+      })
+    )
+    expect(result.resolvedPathname).toBe('/docs/[[...slug]]')
+    expect(result.invocation?.requestMeta.params).toBeUndefined()
+    expect(result.invocation?.requestMeta.locale).toBe('fr')
   })
 
   it('reports params for a concrete output of a dynamic page after a middleware rewrite', async () => {

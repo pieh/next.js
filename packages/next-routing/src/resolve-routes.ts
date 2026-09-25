@@ -619,6 +619,8 @@ function shouldInvokeMiddlewareForRequest(
 
 type ResolveState = {
   requestHeaders: Headers
+  // the request itself named a locale (as opposed to the default one added for routing)
+  explicitLocale: boolean
 }
 
 export async function resolveRoutes(
@@ -627,6 +629,7 @@ export async function resolveRoutes(
   const index = createPathnameIndex(params.pathnames, params.basePath)
   const state: ResolveState = {
     requestHeaders: new Headers(params.headers),
+    explicitLocale: false,
   }
   const result = await resolveRoutesWithIndex(params, index, state)
   return finalizeResult(result, params, index, state)
@@ -640,6 +643,17 @@ function finalizeResult(
 ): ResolveRoutesResult {
   if (!result.invocationTarget) {
     return result
+  }
+
+  if (
+    i18n &&
+    state.explicitLocale &&
+    result.resolvedPathname &&
+    isApiPathname(result.resolvedPathname, index, basePath)
+  ) {
+    // API routes are not localized: `next start` 404s an explicitly
+    // locale-prefixed API request (`checkLocaleApi`)
+    return { resolvedHeaders: result.resolvedHeaders, status: result.status }
   }
 
   const routeParams =
@@ -720,6 +734,22 @@ function getInvocation(
     },
     headers,
   }
+}
+
+function isApiPathname(
+  pathname: string,
+  index: PathnameIndex,
+  basePath: string
+): boolean {
+  const type = lookupPathname(pathname, index)?.type
+  if (type) {
+    return type === 'PAGES_API'
+  }
+  const withoutBasePath =
+    basePath && pathname.startsWith(basePath)
+      ? pathname.slice(basePath.length)
+      : pathname
+  return withoutBasePath === '/api' || withoutBasePath.startsWith('/api/')
 }
 
 function safeDecode(value: string): string {
@@ -971,6 +1001,8 @@ async function resolveRoutesWithIndex(
       }
     | undefined
   const initialOrigin = initialUrl.origin
+  // the locale added for routing to a request that named none
+  let routingLocale: string | undefined
 
   // Data URLs are routed as their page path when there is middleware, like
   // `next start`'s middleware_next_data (`shouldNormalizeNextData` covers
@@ -994,13 +1026,15 @@ async function resolveRoutesWithIndex(
   }
 
   // Handle i18n locale detection and redirects
-  if (i18n && !isDataUrl) {
+  if (i18n) {
     const pathname = currentUrl.pathname.startsWith(basePath)
       ? currentUrl.pathname.slice(basePath.length) || '/'
       : currentUrl.pathname
 
-    // Skip locale handling for _next and api routes
-    if (!pathname.startsWith('/_next/') && !pathname.startsWith('/api/')) {
+    // Like `next start`, every request except `/_next/*` gets a locale for
+    // routing, `/api/*` included: middleware matchers and localized dynamic
+    // routes require one.
+    if (!pathname.startsWith('/_next/')) {
       const hostname = currentUrl.hostname
       const cookieHeader = currentRequestHeaders.get('cookie') || undefined
       const acceptLanguageHeader =
@@ -1009,6 +1043,7 @@ async function resolveRoutesWithIndex(
       // Detect locale from path first
       const pathLocaleResult = normalizeLocalePath(pathname, i18n.locales)
       const localeInPath = !!pathLocaleResult.detectedLocale
+      state.explicitLocale = localeInPath
 
       // Detect domain locale
       const domainLocale = detectDomainLocale(i18n.domains, hostname)
@@ -1018,8 +1053,10 @@ async function resolveRoutesWithIndex(
       let targetLocale = pathLocaleResult.detectedLocale || defaultLocale
 
       // Match Next.js behavior: preferred-locale auto-detection redirects only
-      // on index requests, not on arbitrary non-locale pathnames.
+      // on index requests, not on arbitrary non-locale pathnames. Data requests
+      // never redirect.
       const shouldDetectPreferredLocale =
+        !isDataUrl &&
         i18n.localeDetection !== false &&
         !localeInPath &&
         pathLocaleResult.pathname === '/'
@@ -1045,13 +1082,13 @@ async function resolveRoutesWithIndex(
 
           // Redirect to different domain if target locale has a different configured domain
           if (targetDomain && targetDomain.domain !== hostname) {
+            // like `next start`'s getLocaleRedirect, but keeping basePath and
+            // the query, which it drops
             const scheme = targetDomain.http ? 'http' : 'https'
             const localePrefix =
-              targetLocale === targetDomain.defaultLocale
-                ? ''
-                : `/${targetLocale}`
+              targetLocale === targetDomain.defaultLocale ? '' : targetLocale
             const redirectUrl = new URL(
-              `${scheme}://${targetDomain.domain}${basePath}${localePrefix}${pathname}${currentUrl.search}`
+              `${scheme}://${targetDomain.domain}${basePath}/${localePrefix}${currentUrl.search}`
             )
 
             pendingLocaleRedirect = {
@@ -1067,7 +1104,7 @@ async function resolveRoutesWithIndex(
             (targetDomain && targetDomain.domain === hostname)
           ) {
             const redirectUrl = new URL(currentUrl.toString())
-            redirectUrl.pathname = `${basePath}/${targetLocale}${pathname}`
+            redirectUrl.pathname = `${basePath}/${targetLocale}${params.trailingSlash ? '/' : ''}`
 
             pendingLocaleRedirect = {
               url: redirectUrl,
@@ -1077,13 +1114,28 @@ async function resolveRoutesWithIndex(
         }
       }
 
-      // Prefix the locale internally for route resolution (without redirecting)
+      // Prefix the locale internally for route resolution (without redirecting).
+      // The root becomes `/<locale>` in the spelling `trailingSlash` gives it, so
+      // the trailing-slash redirects do not fire on it: `next start` serves `/`.
       if (!localeInPath && !pendingLocaleRedirect) {
-        const localeToPrefix =
-          targetLocale || domainLocale?.defaultLocale || i18n.defaultLocale
-        currentUrl.pathname = `${basePath}/${localeToPrefix}${pathname}`
+        routingLocale = targetLocale
+        const root = params.trailingSlash ? '/' : ''
+        currentUrl.pathname = `${basePath}/${targetLocale}${pathname === '/' ? root : pathname}`
       }
     }
+  }
+
+  function withoutRoutingLocale(url: URL): URL | undefined {
+    if (!routingLocale) {
+      return undefined
+    }
+    const prefix = `${basePath}/${routingLocale}`
+    if (url.pathname !== prefix && !url.pathname.startsWith(`${prefix}/`)) {
+      return undefined
+    }
+    const stripped = new URL(url.toString())
+    stripped.pathname = `${basePath}${url.pathname.slice(prefix.length)}` || '/'
+    return stripped
   }
 
   // Process beforeMiddleware routes
@@ -1273,8 +1325,16 @@ async function resolveRoutesWithIndex(
     currentUrl = denormalizeNextDataUrl(currentUrl, basePath, buildId)
   }
 
-  // Check if pathname matches any provided pathnames (pathnames are in denormalized form)
-  let matchedPath = matchesPathname(currentUrl.pathname, pathnames)
+  // Check if pathname matches any provided pathnames (pathnames are in
+  // denormalized form). Like `fsChecker.getItem`, fall back to the locale-less
+  // spelling: non-localized outputs (API routes, static files) and pages are
+  // keyed without the locale routing added.
+  let matchedPath = matchesPathnameWithLocaleFallback({
+    pathname: currentUrl.pathname,
+    pathnames,
+    basePath,
+    i18n,
+  })
   if (matchedPath) {
     return resolveMatchedPathname(currentUrl, matchedPath)
   }
@@ -1567,7 +1627,20 @@ async function resolveRoutesWithIndex(
   }
 
   function resolveDynamicRoute(): ResolveRoutesResult | undefined {
-    return resolveDynamicRouteFor(currentUrl)
+    // Dynamic routes of non-localized outputs (API routes) may be emitted without
+    // the locale routing added, so try the request without it too.
+    const candidates = [currentUrl]
+    const withoutLocale = withoutRoutingLocale(currentUrl)
+    if (withoutLocale) {
+      candidates.push(withoutLocale)
+    }
+    for (const candidate of candidates) {
+      const result = resolveDynamicRouteFor(candidate)
+      if (result) {
+        return result
+      }
+    }
+    return undefined
   }
 
   function resolveDynamicRouteFor(

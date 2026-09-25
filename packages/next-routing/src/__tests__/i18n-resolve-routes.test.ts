@@ -45,7 +45,7 @@ describe('resolveRoutes with i18n', () => {
       })
 
       expect(result.redirect).toBeDefined()
-      expect(result.redirect?.url.pathname).toBe('/fr/')
+      expect(result.redirect?.url.pathname).toBe('/fr')
       expect(result.redirect?.status).toBe(307)
     })
 
@@ -60,7 +60,7 @@ describe('resolveRoutes with i18n', () => {
       })
 
       expect(result.redirect).toBeDefined()
-      expect(result.redirect?.url.pathname).toBe('/fr/')
+      expect(result.redirect?.url.pathname).toBe('/fr')
     })
 
     it('should preserve middleware response headers on locale redirect', async () => {
@@ -91,7 +91,7 @@ describe('resolveRoutes with i18n', () => {
 
       expect(invokeMiddleware).toHaveBeenCalledTimes(1)
       expect(result.redirect).toBeDefined()
-      expect(result.redirect?.url.pathname).toBe('/fr/')
+      expect(result.redirect?.url.pathname).toBe('/fr')
       expect(result.resolvedHeaders?.get('x-nested-header')).toBe('valid')
       expect(result.resolvedHeaders?.get('x-append-me')).toBe('top')
     })
@@ -136,7 +136,7 @@ describe('resolveRoutes with i18n', () => {
       })
 
       expect(result.redirect).toBeDefined()
-      expect(result.redirect?.url.pathname).toBe('/ja/')
+      expect(result.redirect?.url.pathname).toBe('/ja')
     })
 
     it('should prioritize cookie over accept-language', async () => {
@@ -151,7 +151,7 @@ describe('resolveRoutes with i18n', () => {
       })
 
       expect(result.redirect).toBeDefined()
-      expect(result.redirect?.url.pathname).toBe('/ja/')
+      expect(result.redirect?.url.pathname).toBe('/ja')
     })
   })
 
@@ -294,7 +294,7 @@ describe('resolveRoutes with i18n', () => {
       })
 
       expect(result.redirect).toBeDefined()
-      expect(result.redirect?.url.pathname).toBe('/base/ja/')
+      expect(result.redirect?.url.pathname).toBe('/base/ja')
     })
 
     it('should handle basePath with domain redirect', async () => {
@@ -327,7 +327,7 @@ describe('resolveRoutes with i18n', () => {
       })
 
       expect(result.redirect).toBeDefined()
-      expect(result.redirect?.url.pathname).toBe('/ja/')
+      expect(result.redirect?.url.pathname).toBe('/ja')
     })
 
     it('should handle query strings', async () => {
@@ -341,7 +341,7 @@ describe('resolveRoutes with i18n', () => {
       })
 
       expect(result.redirect).toBeDefined()
-      expect(result.redirect?.url.pathname).toBe('/ja/')
+      expect(result.redirect?.url.pathname).toBe('/ja')
       expect(result.redirect?.url.search).toBe('?foo=bar')
     })
 
