@@ -44,6 +44,10 @@ if (result.resolvedPathname) {
 }
 ```
 
+`pathnames` entries can carry the output type (`{ pathname, type }`, types as in the adapter output) so type-dependent rules apply, e.g. an explicitly locale-prefixed request never resolves to an API route.
+
+`invocationTarget` is where the request resolved to after rewrites and middleware, for routing or caching by the destination. To invoke the entrypoint of the matched output, apply `result.invocation` as is: `invocation.url` as `req.url`, `invocation.requestMeta` as request meta, and `invocation.headers` as the request headers. See [Routing with @next/routing](https://nextjs.org/docs/app/api-reference/adapters/routing-with-next-routing).
+
 ## Route Resolution Flow
 
 1. **beforeMiddleware routes** - Applied before middleware execution
