@@ -479,6 +479,37 @@ describe('middleware rewrites', () => {
   })
 })
 
+describe('rewrite headers', () => {
+  const routes = {
+    ...emptyRoutes,
+    beforeFiles: [{ sourceRegex: '^/a$', destination: '/b?x=1' }],
+  }
+
+  it('sets x-nextjs-rewritten-path/-query for RSC requests', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/a'),
+        headers: new Headers({ rsc: '1' }),
+        routes,
+        pathnames: ['/b'],
+      })
+    )
+    expect(result.resolvedHeaders?.get('x-nextjs-rewritten-path')).toBe('/b')
+    expect(result.resolvedHeaders?.get('x-nextjs-rewritten-query')).toBe('x=1')
+  })
+
+  it('does not set them for other requests', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/a'),
+        routes,
+        pathnames: ['/b'],
+      })
+    )
+    expect(result.resolvedHeaders?.has('x-nextjs-rewritten-path')).toBe(false)
+  })
+})
+
 describe('invocation', () => {
   it('reports params by name, decoded, with catch-all segments as arrays', async () => {
     const result = await resolveRoutes(

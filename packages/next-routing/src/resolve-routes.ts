@@ -200,6 +200,7 @@ function processRoutes(
         }
 
         // Apply the destination to update the URL
+        const previousUrl = currentUrl
         currentUrl = applyDestination(currentUrl, match.destination)
 
         // Check if origin changed (external rewrite)
@@ -211,6 +212,13 @@ function processRoutes(
             status: currentStatus,
           }
         }
+
+        setRewriteHeaders(
+          previousUrl,
+          currentUrl,
+          requestHeaders,
+          responseHeaders
+        )
       }
     }
   }
@@ -219,6 +227,31 @@ function processRoutes(
 }
 
 const NEXT_DATA_HEADER = 'x-nextjs-data'
+const NEXT_REWRITTEN_PATH_HEADER = 'x-nextjs-rewritten-path'
+const NEXT_REWRITTEN_QUERY_HEADER = 'x-nextjs-rewritten-query'
+
+/**
+ * The client router reads the rewrite destination of an RSC request from these
+ * response headers (`rewriteHeaders` in the routes manifest). Middleware rewrites
+ * set them in the middleware response; config rewrites are set here, as
+ * `next start`'s resolve-routes does.
+ */
+function setRewriteHeaders(
+  before: URL,
+  after: URL,
+  requestHeaders: Headers,
+  responseHeaders: Headers
+) {
+  if (requestHeaders.get('rsc') !== '1') {
+    return
+  }
+  if (before.pathname !== after.pathname) {
+    responseHeaders.set(NEXT_REWRITTEN_PATH_HEADER, after.pathname)
+  }
+  if (before.search !== after.search) {
+    responseHeaders.set(NEXT_REWRITTEN_QUERY_HEADER, after.search.slice(1))
+  }
+}
 
 /**
  * Output pathnames keyed the way `fsChecker.getItem` compares them in `next start`:
@@ -617,6 +650,10 @@ function shouldInvokeMiddlewareForRequest(
   return matchesMiddlewareMatchers(decodedPathname)
 }
 
+type RouteParams = Record<string, string | string[]>
+// params found while matching, moved into `invocation` by finalizeResult
+type InternalResult = ResolveRoutesResult & { params?: RouteParams }
+
 type ResolveState = {
   requestHeaders: Headers
   // the request itself named a locale (as opposed to the default one added for routing)
@@ -710,10 +747,6 @@ function finalizeResult(
       : {}),
   }
 }
-
-type RouteParams = Record<string, string | string[]>
-// params found while matching, moved into `invocation` by finalizeResult
-type InternalResult = ResolveRoutesResult & { params?: RouteParams }
 
 function getInvocation(
   requestUrl: URL,
@@ -1437,6 +1470,7 @@ async function resolveRoutesWithIndex(
       }
 
       // Apply destination
+      const previousUrl = currentUrl
       currentUrl = applyDestination(currentUrl, match.destination)
 
       // Check if origin changed
@@ -1447,6 +1481,13 @@ async function resolveRoutesWithIndex(
           status: currentStatus,
         }
       }
+
+      setRewriteHeaders(
+        previousUrl,
+        currentUrl,
+        currentRequestHeaders,
+        currentResponseHeaders
+      )
 
       const staticMatch = findStaticPathname(currentUrl, staticLookup)
       if (staticMatch) {
