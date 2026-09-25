@@ -76,6 +76,11 @@ export type ResolveRoutesParams = {
    * `config.trailingSlash`, for the URL handed to middleware.
    */
   trailingSlash?: boolean
+  /**
+   * `config.skipProxyUrlNormalize` (or `skipMiddlewareUrlNormalize`): hand
+   * middleware data URLs as they were requested.
+   */
+  skipMiddlewareUrlNormalize?: boolean
   i18n?: {
     defaultLocale: string
     domains?: Array<{
@@ -140,7 +145,10 @@ export type ResolveRoutesResult = {
    */
   resolvedQuery?: ResolveRoutesQuery
   /**
-   * Concrete invocation target to use when invoking the resolved route/module.
+   * Where the request resolved to after rewrites and middleware: route or cache
+   * by it. To invoke the entrypoint use `invocation`. Without `resolvedPathname`
+   * it is the target of a middleware rewrite that no output matches: respond 404
+   * for it, as `next start` does.
    */
   invocationTarget?: RouteInvocationTarget
   resolvedHeaders?: Headers

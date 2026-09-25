@@ -626,6 +626,24 @@ type ResolveState = {
 export async function resolveRoutes(
   params: ResolveRoutesParams
 ): Promise<ResolveRoutesResult> {
+  // `next start` answers a path holding `//` or a backslash with a 308 to its
+  // normalized form before routing (`normalizeRepeatedSlashes`). Without it a page
+  // renders but never hydrates, as the client router compares the browser's path
+  // against the rendered one.
+  const { pathname: requestPathname } = params.url
+  if (requestPathname.includes('//') || requestPathname.includes('\\')) {
+    const normalized = new URL(params.url.toString())
+    normalized.pathname = requestPathname
+      .replaceAll('\\', '/')
+      .replace(/\/{2,}/g, '/')
+    const location = `${normalized.pathname}${normalized.search}`
+    return {
+      redirect: { url: normalized, status: 308 },
+      resolvedHeaders: new Headers({ location }),
+      status: 308,
+    }
+  }
+
   const index = createPathnameIndex(params.pathnames, params.basePath)
   const state: ResolveState = {
     requestHeaders: new Headers(params.headers),
@@ -968,6 +986,24 @@ function normalizeDataUrl(
   return normalized
 }
 
+/**
+ * The URL middleware sees, as `next start` builds it: the URL as requested, no
+ * locale added for routing, and a data URL as its page path with the trailing
+ * slash `trailingSlash` would give it (unless `skipMiddlewareUrlNormalize`).
+ */
+function getMiddlewareUrl(
+  params: ResolveRoutesParams,
+  isDataUrl: boolean
+): URL {
+  const { url, skipMiddlewareUrlNormalize } = params
+  const middlewareUrl = new URL(url.toString())
+  if (!isDataUrl || skipMiddlewareUrlNormalize) {
+    return middlewareUrl
+  }
+  const normalized = normalizeDataUrl(middlewareUrl, params)
+  return normalized
+}
+
 async function resolveRoutesWithIndex(
   params: ResolveRoutesParams,
   pathnames: PathnameIndex,
@@ -1003,6 +1039,7 @@ async function resolveRoutesWithIndex(
   const initialOrigin = initialUrl.origin
   // the locale added for routing to a request that named none
   let routingLocale: string | undefined
+  let middlewareRewriteUrl: URL | undefined
 
   // Data URLs are routed as their page path when there is middleware, like
   // `next start`'s middleware_next_data (`shouldNormalizeNextData` covers
@@ -1176,17 +1213,6 @@ async function resolveRoutesWithIndex(
 
   currentUrl = beforeMiddlewareResult.url
 
-  let middlewareInvocationUrl = currentUrl
-
-  // Denormalize before invoking middleware if this was originally a data URL
-  if (isDataUrl) {
-    middlewareInvocationUrl = denormalizeNextDataUrl(
-      currentUrl,
-      basePath,
-      buildId
-    )
-  }
-
   const shouldInvokeMiddleware = shouldInvokeMiddlewareForRequest(
     routes.middlewareMatchers,
     currentUrl,
@@ -1195,9 +1221,8 @@ async function resolveRoutesWithIndex(
   )
 
   if (shouldInvokeMiddleware) {
-    // Invoke middleware
     const middlewareResult = await invokeMiddleware({
-      url: middlewareInvocationUrl,
+      url: getMiddlewareUrl(params, isDataUrl),
       headers: currentRequestHeaders,
       requestBody,
     })
@@ -1244,6 +1269,7 @@ async function resolveRoutesWithIndex(
     // Handle middleware rewrite
     if (middlewareResult.rewrite) {
       currentUrl = middlewareResult.rewrite
+      middlewareRewriteUrl = middlewareResult.rewrite
 
       // Check if it's an external rewrite
       if (currentUrl.origin !== initialOrigin) {
@@ -1479,7 +1505,20 @@ async function resolveRoutesWithIndex(
     }
   }
 
-  // No match found
+  // No match found. After a middleware rewrite, report the target: `next start`
+  // 404s on it, and invoking the pre-rewrite URL would serve the wrong page.
+  if (middlewareRewriteUrl) {
+    const resolvedQuery = toResolvedQuery(middlewareRewriteUrl)
+    return {
+      resolvedHeaders: currentResponseHeaders,
+      status: currentStatus,
+      resolvedQuery,
+      invocationTarget: {
+        pathname: middlewareRewriteUrl.pathname,
+        query: resolvedQuery,
+      },
+    }
+  }
   return {
     resolvedHeaders: currentResponseHeaders,
     status: currentStatus,

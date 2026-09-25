@@ -118,9 +118,8 @@ describe('normalizeNextData - middleware matchers', () => {
     const result = await resolveRoutes(params)
 
     expect(middlewareMock).toHaveBeenCalledTimes(1)
-    expect(middlewareMock.mock.calls[0][0].url.pathname).toBe(
-      '/_next/data/BUILD_ID/blog/post.json'
-    )
+    // like `next start`, middleware sees a data request as its page path
+    expect(middlewareMock.mock.calls[0][0].url.pathname).toBe('/blog/post')
     expect(result.resolvedPathname).toBe('/_next/data/BUILD_ID/blog/post.json')
   })
 })

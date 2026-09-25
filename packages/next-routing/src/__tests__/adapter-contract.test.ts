@@ -1,5 +1,5 @@
 import { resolveRoutes } from '../resolve-routes'
-import type { ResolveRoutesParams } from '../types'
+import type { MiddlewareContext, ResolveRoutesParams } from '../types'
 
 function createReadableStream(): ReadableStream {
   return new ReadableStream({
@@ -117,6 +117,17 @@ describe('output matching like next start', () => {
     expect(result.routeMatches).toBeUndefined()
     expect(result.invocationTarget?.query).toEqual({})
   })
+
+  it('answers repeated slashes with a redirect to the normalized path', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/a//b?x=1'),
+        pathnames: ['/a/b'],
+      })
+    )
+    expect(result.redirect?.status).toBe(308)
+    expect(result.resolvedHeaders?.get('location')).toBe('/a/b?x=1')
+  })
 })
 
 describe('data requests', () => {
@@ -194,6 +205,24 @@ describe('data requests', () => {
     )
     expect(result.status).toBeUndefined()
     expect(result.resolvedPathname).toBe('/_next/data/BUILD_ID/page.json')
+  })
+
+  it('normalizes data URLs for middleware even without the flag, like next start', async () => {
+    const urls: string[] = []
+    await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/_next/data/BUILD_ID/test.json'),
+        routes: {
+          ...emptyRoutes,
+          middlewareMatchers: [{ sourceRegex: '^.*$' }],
+        },
+        invokeMiddleware: async (ctx) => {
+          urls.push(ctx.url.pathname)
+          return {}
+        },
+      })
+    )
+    expect(urls).toEqual(['/test'])
   })
 
   it('invokes data requests matched through dynamic routes as data URLs', async () => {
@@ -354,6 +383,61 @@ describe('i18n like next start', () => {
     expect(withSlash.redirect?.url.pathname).toBe('/fr/')
   })
 
+  it('passes middleware the URL as requested', async () => {
+    const urls: string[] = []
+    const invokeMiddleware = async (ctx: MiddlewareContext) => {
+      urls.push(ctx.url.pathname)
+      return {}
+    }
+    const routes = {
+      ...emptyRoutes,
+      shouldNormalizeNextData: true,
+      middlewareMatchers: [{ sourceRegex: '^.*$' }],
+    }
+    await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/about'),
+        i18n,
+        routes,
+        pathnames: ['/about'],
+        invokeMiddleware,
+      })
+    )
+    await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/_next/data/BUILD_ID/about.json'),
+        i18n,
+        routes,
+        pathnames: ['/_next/data/BUILD_ID/en/about.json'],
+        invokeMiddleware,
+      })
+    )
+    expect(urls).toEqual(['/about', '/about'])
+  })
+
+  it('passes middleware data URLs as their page path, with trailingSlash and unless skipMiddlewareUrlNormalize', async () => {
+    const urls: string[] = []
+    const invokeMiddleware = async (ctx: MiddlewareContext) => {
+      urls.push(ctx.url.pathname)
+      return {}
+    }
+    const base = {
+      url: new URL('https://example.com/_next/data/BUILD_ID/ssr-page.json'),
+      routes: {
+        ...emptyRoutes,
+        shouldNormalizeNextData: true,
+        middlewareMatchers: [{ sourceRegex: '^.*$' }],
+      },
+      pathnames: ['/_next/data/BUILD_ID/ssr-page.json'],
+      invokeMiddleware,
+    }
+    await resolveRoutes(createBaseParams({ ...base, trailingSlash: true }))
+    await resolveRoutes(
+      createBaseParams({ ...base, skipMiddlewareUrlNormalize: true })
+    )
+    expect(urls).toEqual(['/ssr-page/', '/_next/data/BUILD_ID/ssr-page.json'])
+  })
+
   it('reports the locale of a middleware rewrite target', async () => {
     const result = await resolveRoutes(
       createBaseParams({
@@ -371,6 +455,27 @@ describe('i18n like next start', () => {
     )
     expect(result.resolvedPathname).toBe('/about')
     expect(result.invocation?.requestMeta.locale).toBe('fr')
+  })
+})
+
+describe('middleware rewrites', () => {
+  it('reports the target of a rewrite no output matches', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/page'),
+        routes: {
+          ...emptyRoutes,
+          middlewareMatchers: [{ sourceRegex: '^.*$' }],
+        },
+        pathnames: ['/page'],
+        invokeMiddleware: async () => ({
+          rewrite: new URL('https://example.com/missing?x=1'),
+        }),
+      })
+    )
+    expect(result.resolvedPathname).toBeUndefined()
+    expect(result.invocationTarget?.pathname).toBe('/missing')
+    expect(result.invocationTarget?.query).toEqual({ x: '1' })
   })
 })
 
