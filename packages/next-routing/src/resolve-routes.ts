@@ -1,5 +1,6 @@
 import type {
   Route,
+  RoutablePathname,
   ResolveRoutesParams,
   ResolveRoutesQuery,
   ResolveRoutesResult,
@@ -217,18 +218,72 @@ function processRoutes(
 }
 
 /**
+ * Output pathnames keyed the way `fsChecker.getItem` compares them in `next start`:
+ * without a trailing slash, with the Pages Router root `/index` also reachable as
+ * `/`. Requests are decoded before lookup (output pathnames are the decoded form
+ * Next emits, requests arrive percent-encoded).
+ */
+type PathnameIndex = Map<
+  string,
+  RoutablePathname | { pathname: string; type?: undefined }
+>
+
+function canonicalPathname(pathname: string): string {
+  return pathname.length > 1 && pathname.endsWith('/')
+    ? pathname.slice(0, -1)
+    : pathname
+}
+
+function createPathnameIndex(
+  pathnames: ResolveRoutesParams['pathnames'],
+  basePath: string
+): PathnameIndex {
+  const index: PathnameIndex = new Map()
+  for (const entry of pathnames) {
+    const output = typeof entry === 'string' ? { pathname: entry } : entry
+    const key = canonicalPathname(output.pathname)
+    if (!index.has(key)) {
+      index.set(key, output)
+    }
+    if (key === `${basePath}/index`) {
+      const root = basePath || '/'
+      if (!index.has(root)) {
+        index.set(root, output)
+      }
+    }
+  }
+  return index
+}
+
+function lookupPathname(
+  pathname: string,
+  index: PathnameIndex
+): RoutablePathname | { pathname: string; type?: undefined } | undefined {
+  const canonical = canonicalPathname(pathname)
+  const direct = index.get(canonical)
+  if (direct) {
+    return direct
+  }
+  if (!canonical.includes('%')) {
+    return undefined
+  }
+  let decoded: string
+  try {
+    decoded = decodeURIComponent(canonical)
+  } catch {
+    return undefined
+  }
+  return decoded !== canonical ? index.get(decoded) : undefined
+}
+
+/**
  * Checks if the current pathname matches any of the provided pathnames
  */
 function matchesPathname(
   pathname: string,
-  pathnames: string[]
+  pathnames: PathnameIndex
 ): string | undefined {
-  for (const candidate of pathnames) {
-    if (pathname === candidate) {
-      return candidate
-    }
-  }
-  return undefined
+  return lookupPathname(pathname, pathnames)?.pathname
 }
 
 function matchesPathnameWithLocaleFallback({
@@ -238,7 +293,7 @@ function matchesPathnameWithLocaleFallback({
   i18n,
 }: {
   pathname: string
-  pathnames: string[]
+  pathnames: PathnameIndex
   basePath: string
   i18n?: ResolveRoutesParams['i18n']
 }): string | undefined {
@@ -409,7 +464,7 @@ function applyOnMatchHeaders(
 function checkDynamicRoutes(
   dynamicRoutes: Route[],
   url: URL,
-  pathnames: string[],
+  pathnames: PathnameIndex,
   requestHeaders: Headers,
   responseHeaders: Headers,
   onMatchRoutes: Route[],
@@ -567,7 +622,7 @@ export async function resolveRoutes(
     basePath,
     requestBody,
     headers: initialHeaders,
-    pathnames,
+    pathnames: pathnameList,
     routes,
     invokeMiddleware,
     buildId,
@@ -575,6 +630,7 @@ export async function resolveRoutes(
   } = params
 
   const { shouldNormalizeNextData, caseSensitive = false } = routes
+  const pathnames = createPathnameIndex(pathnameList, basePath)
 
   let currentUrl = new URL(initialUrl.toString())
   let currentRequestHeaders = new Headers(initialHeaders)

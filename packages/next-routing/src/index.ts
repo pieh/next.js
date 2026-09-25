@@ -9,6 +9,8 @@ export type {
   ResolveRoutesQuery,
   ResolveRoutesQueryValue,
   RouteInvocationTarget,
+  RoutablePathname,
+  RoutablePathnameType,
 } from './types'
 export type { I18nConfig, I18nDomain } from './i18n'
 export {

@@ -39,13 +39,39 @@ export type MiddlewareResult = {
   rewrite?: URL
 }
 
+/**
+ * Output types as the adapter output names them (`AdapterOutputType` in `next`).
+ */
+export type RoutablePathnameType =
+  | 'PAGES'
+  | 'PAGES_API'
+  | 'APP_PAGE'
+  | 'APP_ROUTE'
+  | 'PRERENDER'
+  | 'STATIC_FILE'
+  | 'MIDDLEWARE'
+
+export type RoutablePathname = {
+  pathname: string
+  /**
+   * Type of the output the pathname belongs to, copied from the adapter output.
+   * `public/` files, which are not adapter outputs, are `STATIC_FILE`.
+   */
+  type: RoutablePathnameType
+}
+
 export type ResolveRoutesParams = {
   url: URL
   buildId: string
   basePath: string
   requestBody: ReadableStream
   headers: Headers
-  pathnames: string[]
+  /**
+   * Pathnames of the outputs requests can resolve to, as keyed in the adapter
+   * output. Passing the output type lets type-dependent rules apply, e.g. an
+   * explicitly locale-prefixed request never resolves to an API route.
+   */
+  pathnames: Array<string | RoutablePathname>
   i18n?: {
     defaultLocale: string
     domains?: Array<{
