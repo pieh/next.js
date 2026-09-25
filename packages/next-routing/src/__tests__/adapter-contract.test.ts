@@ -91,6 +91,30 @@ describe('output matching like next start', () => {
     )
     expect(withBasePath.resolvedPathname).toBe('/base/index')
   })
+
+  it('prefers an output over a dynamic route after an afterFiles rewrite', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/rewrite-1'),
+        routes: {
+          ...emptyRoutes,
+          afterFiles: [
+            { sourceRegex: '^/rewrite-1$', destination: '/ssr-page' },
+          ],
+          dynamicRoutes: [
+            {
+              sourceRegex: '^/(?<nxtPid>[^/]+?)$',
+              destination: '/[id]?nxtPid=$nxtPid',
+            },
+          ],
+        },
+        pathnames: ['/ssr-page', '/[id]'],
+      })
+    )
+    expect(result.resolvedPathname).toBe('/ssr-page')
+    expect(result.routeMatches).toBeUndefined()
+    expect(result.invocationTarget?.query).toEqual({})
+  })
 })
 
 describe('invocation', () => {
@@ -134,6 +158,31 @@ describe('invocation', () => {
       })
     )
     expect(result.invocation?.requestMeta.params).toEqual({ 'post-id': '42' })
+  })
+
+  it('reports params for a concrete output of a dynamic page after a middleware rewrite', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/to-ssg'),
+        routes: {
+          ...emptyRoutes,
+          middlewareMatchers: [{ sourceRegex: '^.*$' }],
+          dynamicRoutes: [
+            {
+              sourceRegex: '^/ssg/(?<nxtPslug>[^/]+?)$',
+              destination: '/ssg/[slug]?nxtPslug=$nxtPslug',
+            },
+          ],
+        },
+        pathnames: ['/ssg/hello', '/ssg/[slug]'],
+        invokeMiddleware: async () => ({
+          rewrite: new URL('https://example.com/ssg/hello'),
+        }),
+      })
+    )
+    expect(result.resolvedPathname).toBe('/ssg/hello')
+    expect(result.routeMatches).toBeUndefined()
+    expect(result.invocation?.requestMeta.params).toEqual({ slug: 'hello' })
   })
 
   it('returns the invocation: requested URL, rewrite result as request meta', async () => {
