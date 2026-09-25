@@ -141,5 +141,42 @@ export type ResolveRoutesResult = {
   invocationTarget?: RouteInvocationTarget
   resolvedHeaders?: Headers
   status?: number
+  /**
+   * Raw regex groups of the matched dynamic route. `invocation` carries the
+   * params a route module expects.
+   */
   routeMatches?: Record<string, string>
+  /**
+   * How to invoke the entrypoint of the output matching `resolvedPathname`, so
+   * that it behaves like under `next start`. Apply as is.
+   */
+  invocation?: RouteInvocation
+}
+
+export type RouteInvocation = {
+  /**
+   * `req.url`: the URL as requested (path and query), not the rewrite target.
+   * Route handlers read the query from it only, so for `APP_ROUTE` and
+   * `PAGES_API` outputs the rewrite query is folded in.
+   */
+  url: string
+  /**
+   * Request meta to pass to the entrypoint, next to the platform's own
+   * (`waitUntil`, `revalidate`, `render404`, ...).
+   */
+  requestMeta: {
+    initURL: string
+    /** Query after rewrites and middleware. */
+    query: ResolveRoutesQuery
+    /** Route params by name, decoded, catch-all segments as arrays. */
+    params?: Record<string, string | string[]>
+    /** Locale to render in, including after a middleware rewrite to another one. */
+    locale?: string
+  }
+  /**
+   * Request headers to invoke the entrypoint with: the incoming ones with
+   * middleware request-header overrides applied, and `x-nextjs-data` set for
+   * data requests (and only for them).
+   */
+  headers: Record<string, string>
 }

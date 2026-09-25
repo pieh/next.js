@@ -32,6 +32,15 @@ function createBaseParams(
   }
 }
 
+const emptyRoutes = {
+  beforeMiddleware: [],
+  beforeFiles: [],
+  afterFiles: [],
+  dynamicRoutes: [],
+  onMatch: [],
+  fallback: [],
+}
+
 describe('output matching like next start', () => {
   it('matches outputs regardless of a trailing slash', async () => {
     const result = await resolveRoutes(
@@ -81,5 +90,104 @@ describe('output matching like next start', () => {
       })
     )
     expect(withBasePath.resolvedPathname).toBe('/base/index')
+  })
+})
+
+describe('invocation', () => {
+  it('reports params by name, decoded, with catch-all segments as arrays', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/shop/caf%C3%A9/a/b%20c'),
+        routes: {
+          ...emptyRoutes,
+          dynamicRoutes: [
+            {
+              sourceRegex: '^/shop/(?<nxtPslug>[^/]+?)/(?<nxtPrest>.+?)$',
+              destination: '/shop/[slug]/[...rest]',
+            },
+          ],
+        },
+        pathnames: ['/shop/[slug]/[...rest]'],
+      })
+    )
+    expect(result.invocation?.requestMeta.params).toEqual({
+      slug: 'café',
+      rest: ['a', 'b c'],
+    })
+  })
+
+  it('reports params whatever Next named the regex groups', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/p/42'),
+        routes: {
+          ...emptyRoutes,
+          // a param name Next can't use as a group name gets a generated key
+          dynamicRoutes: [
+            {
+              sourceRegex: '^/p/(?<a>[^/]+?)$',
+              destination: '/p/[post-id]?nxtPa=$a',
+            },
+          ],
+        },
+        pathnames: ['/p/[post-id]'],
+      })
+    )
+    expect(result.invocation?.requestMeta.params).toEqual({ 'post-id': '42' })
+  })
+
+  it('returns the invocation: requested URL, rewrite result as request meta', async () => {
+    const routes = {
+      ...emptyRoutes,
+      beforeFiles: [{ sourceRegex: '^/a$', destination: '/b?x=1' }],
+    }
+    const page = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/a?y=2'),
+        routes,
+        pathnames: [{ pathname: '/b', type: 'PAGES' }],
+      })
+    )
+    expect(page.invocation).toEqual({
+      url: '/a?y=2',
+      requestMeta: {
+        initURL: 'https://example.com/a?y=2',
+        query: { y: '2', x: '1' },
+      },
+      headers: {},
+    })
+
+    // route handlers only read the URL, so the rewrite query is folded in
+    const route = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/a?y=2'),
+        routes,
+        pathnames: [{ pathname: '/b', type: 'APP_ROUTE' }],
+      })
+    )
+    expect(route.invocation?.url).toBe('/a?y=2&x=1')
+  })
+
+  it('reports request headers with middleware overrides applied', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/page'),
+        headers: new Headers({ 'x-original': '1' }),
+        routes: {
+          ...emptyRoutes,
+          middlewareMatchers: [{ sourceRegex: '^.*$' }],
+        },
+        pathnames: ['/page'],
+        invokeMiddleware: async (ctx) => {
+          const requestHeaders = new Headers(ctx.headers)
+          requestHeaders.set('x-from-middleware', 'yes')
+          return { requestHeaders }
+        },
+      })
+    )
+    expect(result.invocation?.headers).toEqual({
+      'x-original': '1',
+      'x-from-middleware': 'yes',
+    })
   })
 })

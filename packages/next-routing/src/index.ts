@@ -11,6 +11,7 @@ export type {
   RouteInvocationTarget,
   RoutablePathname,
   RoutablePathnameType,
+  RouteInvocation,
 } from './types'
 export type { I18nConfig, I18nDomain } from './i18n'
 export {

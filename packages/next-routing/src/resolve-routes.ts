@@ -1,5 +1,6 @@
 import type {
   Route,
+  RouteInvocation,
   RoutablePathname,
   ResolveRoutesParams,
   ResolveRoutesQuery,
@@ -614,15 +615,262 @@ function shouldInvokeMiddlewareForRequest(
   return matchesMiddlewareMatchers(decodedPathname)
 }
 
+type ResolveState = {
+  requestHeaders: Headers
+}
+
 export async function resolveRoutes(
   params: ResolveRoutesParams
+): Promise<ResolveRoutesResult> {
+  const index = createPathnameIndex(params.pathnames, params.basePath)
+  const state: ResolveState = {
+    requestHeaders: new Headers(params.headers),
+  }
+  const result = await resolveRoutesWithIndex(params, index, state)
+  return finalizeResult(result, params, index, state)
+}
+
+function finalizeResult(
+  result: ResolveRoutesResult,
+  { basePath, buildId, i18n, url }: ResolveRoutesParams,
+  index: PathnameIndex,
+  state: ResolveState
+): ResolveRoutesResult {
+  if (!result.invocationTarget) {
+    return result
+  }
+
+  const routeParams =
+    result.resolvedPathname &&
+    isDynamicTemplatePathname(result.resolvedPathname)
+      ? getRouteParams(
+          result.resolvedPathname,
+          result.invocationTarget.pathname,
+          { basePath, buildId, i18n }
+        )
+      : undefined
+
+  const locale = i18n
+    ? getInvocationLocale(
+        [result.invocationTarget.pathname, url.pathname],
+        { basePath, buildId, i18n },
+        url.hostname
+      )
+    : undefined
+  const headers = Object.fromEntries(state.requestHeaders.entries())
+
+  return {
+    ...result,
+    ...(result.resolvedPathname
+      ? {
+          invocation: getInvocation(
+            url,
+            result.invocationTarget.query,
+            lookupPathname(result.resolvedPathname, index)?.type,
+            { params: routeParams, locale, headers }
+          ),
+        }
+      : {}),
+  }
+}
+
+type RouteParams = Record<string, string | string[]>
+
+function getInvocation(
+  requestUrl: URL,
+  query: ResolveRoutesQuery,
+  outputType: RoutablePathname['type'] | undefined,
+  {
+    params,
+    locale,
+    headers,
+  }: {
+    params: RouteParams | undefined
+    locale: string | undefined
+    headers: Record<string, string>
+  }
+): RouteInvocation {
+  const invokeUrl = new URL(requestUrl.toString())
+  // route handlers read search params from the URL only, there is no other
+  // channel for the query a rewrite added
+  if (outputType === 'APP_ROUTE' || outputType === 'PAGES_API') {
+    for (const [key, valueOrValues] of Object.entries(query)) {
+      invokeUrl.searchParams.delete(key)
+      for (const value of Array.isArray(valueOrValues)
+        ? valueOrValues
+        : [valueOrValues]) {
+        invokeUrl.searchParams.append(key, value)
+      }
+    }
+  }
+  return {
+    url: `${invokeUrl.pathname}${invokeUrl.search}`,
+    requestMeta: {
+      initURL: requestUrl.toString(),
+      query,
+      ...(params ? { params } : {}),
+      ...(locale ? { locale } : {}),
+    },
+    headers,
+  }
+}
+
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    return value
+  }
+}
+
+type PathContext = {
+  basePath: string
+  buildId: string
+  i18n: ResolveRoutesParams['i18n']
+}
+
+/** A pathname as its page path: without basePath, `/_next/data/<buildId>/…json`. */
+function toPagePath(
+  pathname: string,
+  { basePath, buildId }: PathContext
+): string {
+  let page =
+    basePath && pathname.startsWith(basePath)
+      ? pathname.slice(basePath.length) || '/'
+      : pathname
+  const dataPrefix = `/_next/data/${buildId}/`
+  if (page.startsWith(dataPrefix)) {
+    const rest = page.slice(dataPrefix.length).replace(/\.json$/, '')
+    page = rest === 'index' ? '/' : `/${rest}`
+  }
+  return page
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/**
+ * Route params as route modules expect them (decoded, catch-all segments as
+ * arrays), by matching the invoked path against the output's template, like
+ * Next's route matcher does. Unlike the dynamic route's regex groups this does
+ * not depend on how Next names them (`nxtP<param>`, or generated keys).
+ */
+function getRouteParams(
+  template: string,
+  pathname: string,
+  context: PathContext
+): Record<string, string | string[]> | undefined {
+  const templatePage = toPagePath(template, context)
+  const names: Array<{ name: string; catchAll: boolean }> = []
+  let source = ''
+  for (const segment of templatePage.split('/').slice(1)) {
+    const optionalCatchAll = /^\[\[\.\.\.([^\]]+)\]\]$/.exec(segment)
+    const catchAll = /^\[\.\.\.([^\]]+)\]$/.exec(segment)
+    const dynamic = /^\[([^\]]+)\]$/.exec(segment)
+    if (optionalCatchAll) {
+      names.push({ name: optionalCatchAll[1], catchAll: true })
+      source += '(?:/(.+?))?'
+    } else if (catchAll) {
+      names.push({ name: catchAll[1], catchAll: true })
+      source += '/(.+?)'
+    } else if (dynamic) {
+      names.push({ name: dynamic[1], catchAll: false })
+      source += '/([^/]+?)'
+    } else if (segment) {
+      source += `/${escapeRegex(segment)}`
+    }
+  }
+  if (names.length === 0) {
+    return undefined
+  }
+  const regex = new RegExp(`^${source}/?$`)
+
+  const page = toPagePath(pathname, context)
+  const candidates = [page]
+  if (context.i18n) {
+    const { pathname: withoutLocale, detectedLocale } = normalizeLocalePath(
+      page,
+      context.i18n.locales
+    )
+    if (detectedLocale) {
+      candidates.push(withoutLocale)
+    }
+  }
+  for (const candidate of candidates) {
+    const match = regex.exec(candidate)
+    if (!match) {
+      continue
+    }
+    const params: Record<string, string | string[]> = {}
+    names.forEach(({ name, catchAll }, index) => {
+      const value = match[index + 1]
+      if (value === undefined) {
+        return
+      }
+      params[name] = catchAll
+        ? value.split('/').filter(Boolean).map(safeDecode)
+        : safeDecode(value)
+    })
+    return Object.keys(params).length > 0 ? params : undefined
+  }
+  return undefined
+}
+
+function getPathnameLocale(
+  pathname: string,
+  {
+    basePath,
+    buildId,
+    i18n,
+  }: {
+    basePath: string
+    buildId: string
+    i18n: NonNullable<ResolveRoutesParams['i18n']>
+  }
+): string | undefined {
+  let rest =
+    basePath && pathname.startsWith(basePath)
+      ? pathname.slice(basePath.length)
+      : pathname
+  const dataPrefix = `/_next/data/${buildId}/`
+  if (rest.startsWith(dataPrefix)) {
+    // the index data path of a locale is `<locale>.json`
+    rest = `/${rest.slice(dataPrefix.length).replace(/\.json$/, '')}`
+  }
+  return normalizeLocalePath(rest, i18n.locales).detectedLocale
+}
+
+function getInvocationLocale(
+  pathnames: string[],
+  context: {
+    basePath: string
+    buildId: string
+    i18n: NonNullable<ResolveRoutesParams['i18n']>
+  },
+  hostname: string
+): string {
+  for (const pathname of pathnames) {
+    const locale = getPathnameLocale(pathname, context)
+    if (locale) {
+      return locale
+    }
+  }
+  return (
+    detectDomainLocale(context.i18n.domains, hostname)?.defaultLocale ||
+    context.i18n.defaultLocale
+  )
+}
+
+async function resolveRoutesWithIndex(
+  params: ResolveRoutesParams,
+  pathnames: PathnameIndex,
+  state: ResolveState
 ): Promise<ResolveRoutesResult> {
   const {
     url: initialUrl,
     basePath,
     requestBody,
-    headers: initialHeaders,
-    pathnames: pathnameList,
     routes,
     invokeMiddleware,
     buildId,
@@ -630,10 +878,9 @@ export async function resolveRoutes(
   } = params
 
   const { shouldNormalizeNextData, caseSensitive = false } = routes
-  const pathnames = createPathnameIndex(pathnameList, basePath)
 
   let currentUrl = new URL(initialUrl.toString())
-  let currentRequestHeaders = new Headers(initialHeaders)
+  let currentRequestHeaders = state.requestHeaders
   let currentResponseHeaders = new Headers()
   let currentStatus: number | undefined
   let pendingLocaleRedirect:
@@ -825,6 +1072,7 @@ export async function resolveRoutes(
     // Apply request headers from middleware
     if (middlewareResult.requestHeaders) {
       currentRequestHeaders = new Headers(middlewareResult.requestHeaders)
+      state.requestHeaders = currentRequestHeaders
     }
 
     // Apply response headers from middleware
