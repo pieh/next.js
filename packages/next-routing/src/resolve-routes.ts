@@ -218,6 +218,8 @@ function processRoutes(
   return { url: currentUrl, stopped: false, status: currentStatus }
 }
 
+const NEXT_DATA_HEADER = 'x-nextjs-data'
+
 /**
  * Output pathnames keyed the way `fsChecker.getItem` compares them in `next start`:
  * without a trailing slash, with the Pages Router root `/index` also reachable as
@@ -914,6 +916,28 @@ function findStaticPathname(
   return undefined
 }
 
+/**
+ * A data URL as its page path, the way `next start` normalizes it
+ * (`middleware_next_data`): with the trailing slash `trailingSlash` gives page
+ * paths, so the internal trailing-slash redirect does not fire on it.
+ */
+function normalizeDataUrl(
+  url: URL,
+  { basePath, buildId, trailingSlash }: ResolveRoutesParams
+): URL {
+  const normalized = normalizeNextDataUrl(url, basePath, buildId)
+  const { pathname } = normalized
+  if (
+    trailingSlash &&
+    pathname !== (basePath || '/') &&
+    !pathname.endsWith('/') &&
+    !pathname.slice(pathname.lastIndexOf('/')).includes('.')
+  ) {
+    normalized.pathname += '/'
+  }
+  return normalized
+}
+
 async function resolveRoutesWithIndex(
   params: ResolveRoutesParams,
   pathnames: PathnameIndex,
@@ -929,7 +953,7 @@ async function resolveRoutesWithIndex(
     i18n,
   } = params
 
-  const { shouldNormalizeNextData, caseSensitive = false } = routes
+  const { caseSensitive = false } = routes
 
   let currentUrl = new URL(initialUrl.toString())
   let currentRequestHeaders = state.requestHeaders
@@ -948,15 +972,25 @@ async function resolveRoutesWithIndex(
     | undefined
   const initialOrigin = initialUrl.origin
 
-  // Check if the original URL is a data URL and normalize if so
-  let isDataUrl = false
-  if (shouldNormalizeNextData) {
-    const dataPrefix = `${basePath}/_next/data/${buildId}/`
-    isDataUrl = initialUrl.pathname.startsWith(dataPrefix)
-
-    if (isDataUrl) {
-      currentUrl = normalizeNextDataUrl(currentUrl, basePath, buildId)
-    }
+  // Data URLs are routed as their page path when there is middleware, like
+  // `next start`'s middleware_next_data (`shouldNormalizeNextData` covers
+  // middleware with pages only). Without middleware the client resolves rewrites
+  // itself and requests the destination's data URL, so `next start` routes the
+  // data URL as it is.
+  const dataPrefix = `${basePath}/_next/data/${buildId}/`
+  const hasDataPrefix = initialUrl.pathname.startsWith(dataPrefix)
+  const isDataUrl =
+    hasDataPrefix &&
+    (!!routes.shouldNormalizeNextData ||
+      (routes.middlewareMatchers?.length ?? 0) > 0)
+  if (isDataUrl) {
+    currentUrl = normalizeDataUrl(currentUrl, params)
+  }
+  // Route modules and middleware key data-request behaviour off this header, so
+  // it is set from the URL and never trusted from the client.
+  currentRequestHeaders.delete(NEXT_DATA_HEADER)
+  if (hasDataPrefix) {
+    currentRequestHeaders.set(NEXT_DATA_HEADER, '1')
   }
 
   // Handle i18n locale detection and redirects
@@ -1093,7 +1127,7 @@ async function resolveRoutesWithIndex(
   let middlewareInvocationUrl = currentUrl
 
   // Denormalize before invoking middleware if this was originally a data URL
-  if (isDataUrl && shouldNormalizeNextData) {
+  if (isDataUrl) {
     middlewareInvocationUrl = denormalizeNextDataUrl(
       currentUrl,
       basePath,
@@ -1124,6 +1158,9 @@ async function resolveRoutesWithIndex(
     // Apply request headers from middleware
     if (middlewareResult.requestHeaders) {
       currentRequestHeaders = new Headers(middlewareResult.requestHeaders)
+      if (hasDataPrefix) {
+        currentRequestHeaders.set(NEXT_DATA_HEADER, '1')
+      }
       state.requestHeaders = currentRequestHeaders
     }
 
@@ -1188,8 +1225,8 @@ async function resolveRoutesWithIndex(
   }
 
   // Normalize again after middleware if this was originally a data URL
-  if (isDataUrl && shouldNormalizeNextData) {
-    currentUrl = normalizeNextDataUrl(currentUrl, basePath, buildId)
+  if (isDataUrl) {
+    currentUrl = normalizeDataUrl(currentUrl, params)
   }
 
   // Process beforeFiles routes
@@ -1232,7 +1269,7 @@ async function resolveRoutesWithIndex(
   currentUrl = beforeFilesResult.url
 
   // Denormalize before checking pathnames if this was originally a data URL
-  if (isDataUrl && shouldNormalizeNextData) {
+  if (isDataUrl) {
     currentUrl = denormalizeNextDataUrl(currentUrl, basePath, buildId)
   }
 
@@ -1243,8 +1280,8 @@ async function resolveRoutesWithIndex(
   }
 
   // Normalize again before processing afterFiles if this was originally a data URL
-  if (isDataUrl && shouldNormalizeNextData) {
-    currentUrl = normalizeNextDataUrl(currentUrl, basePath, buildId)
+  if (isDataUrl) {
+    currentUrl = normalizeDataUrl(currentUrl, params)
   }
 
   const staticLookup = {
@@ -1252,7 +1289,7 @@ async function resolveRoutesWithIndex(
     basePath,
     buildId,
     i18n,
-    isDataUrl: isDataUrl && !!shouldNormalizeNextData,
+    isDataUrl,
   }
 
   // Process afterFiles routes, then fallback routes: both rewrite, then resolve
@@ -1340,7 +1377,7 @@ async function resolveRoutesWithIndex(
         basePath,
         buildId,
         i18n,
-        shouldNormalizeNextData,
+        true,
         isDataUrl,
         caseSensitive
       )
@@ -1349,10 +1386,9 @@ async function resolveRoutesWithIndex(
       }
 
       // A rewrite to a dynamic route's template pathname itself
-      const pathnameCheckUrl =
-        isDataUrl && shouldNormalizeNextData
-          ? denormalizeNextDataUrl(currentUrl, basePath, buildId)
-          : currentUrl
+      const pathnameCheckUrl = isDataUrl
+        ? denormalizeNextDataUrl(currentUrl, basePath, buildId)
+        : currentUrl
       matchedPath = matchesPathname(pathnameCheckUrl.pathname, pathnames)
       if (matchedPath) {
         const finalHeaders = applyOnMatchHeaders(
@@ -1604,7 +1640,10 @@ async function resolveRoutesWithIndex(
         },
         url: resolvedUrl,
         resolvedPathname: dynamicMatchedPath,
-        invocationPathname: candidateUrl.pathname,
+        // data requests are invoked as data URLs whichever way they matched
+        invocationPathname: isDataUrl
+          ? denormalizeNextDataUrl(candidateUrl, basePath, buildId).pathname
+          : candidateUrl.pathname,
       })
     }
     return undefined

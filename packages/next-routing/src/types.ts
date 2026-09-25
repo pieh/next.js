@@ -72,6 +72,10 @@ export type ResolveRoutesParams = {
    * explicitly locale-prefixed request never resolves to an API route.
    */
   pathnames: Array<string | RoutablePathname>
+  /**
+   * `config.trailingSlash`, for the URL handed to middleware.
+   */
+  trailingSlash?: boolean
   i18n?: {
     defaultLocale: string
     domains?: Array<{

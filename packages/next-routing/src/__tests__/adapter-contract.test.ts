@@ -117,6 +117,107 @@ describe('output matching like next start', () => {
   })
 })
 
+describe('data requests', () => {
+  it('sets x-nextjs-data for data requests and drops a client-sent one', async () => {
+    const trailingSlashRedirect = {
+      sourceRegex: '^(?:\\/((?:[^/]+\\/)*[^/\\.]+))$',
+      headers: { Location: '/$1/' },
+      status: 308,
+      missing: [{ type: 'header' as const, key: 'x-nextjs-data' }],
+    }
+    const routes = { ...emptyRoutes, beforeMiddleware: [trailingSlashRedirect] }
+
+    const data = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/_next/data/BUILD_ID/page.json'),
+        routes,
+        pathnames: ['/_next/data/BUILD_ID/page.json'],
+      })
+    )
+    expect(data.redirect).toBeUndefined()
+    expect(data.resolvedPathname).toBe('/_next/data/BUILD_ID/page.json')
+    expect(data.invocation?.headers['x-nextjs-data']).toBe('1')
+
+    const spoofed = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/page'),
+        headers: new Headers({ 'x-nextjs-data': '1' }),
+        routes,
+        pathnames: ['/page'],
+      })
+    )
+    // the client's header is ignored, so the trailing-slash redirect still applies
+    expect(spoofed.status).toBe(308)
+    expect(spoofed.resolvedHeaders?.get('location')).toBe('/page/')
+  })
+
+  it('denormalizes a slashed page path without a slash before .json', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/_next/data/BUILD_ID/ssr-page.json'),
+        trailingSlash: true,
+        routes: {
+          ...emptyRoutes,
+          shouldNormalizeNextData: true,
+          middlewareMatchers: [{ sourceRegex: '^.*$' }],
+        },
+        pathnames: ['/_next/data/BUILD_ID/ssr-page-2.json'],
+        invokeMiddleware: async () => ({
+          rewrite: new URL('https://example.com/ssr-page-2/'),
+        }),
+      })
+    )
+    expect(result.resolvedPathname).toBe('/_next/data/BUILD_ID/ssr-page-2.json')
+  })
+
+  it('does not trailing-slash redirect data requests with trailingSlash', async () => {
+    // Next's own /:notfile rule, without a missing: x-nextjs-data condition
+    const addTrailingSlash = {
+      sourceRegex:
+        '^(?:\\/((?!\\.well-known(?:\\/.*)?)(?:[^/]+\\/)*[^/\\.]+))$',
+      headers: { Location: '/$1/' },
+      status: 308,
+    }
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/_next/data/BUILD_ID/page.json'),
+        trailingSlash: true,
+        routes: {
+          ...emptyRoutes,
+          shouldNormalizeNextData: true,
+          beforeMiddleware: [addTrailingSlash],
+        },
+        pathnames: ['/_next/data/BUILD_ID/page.json'],
+      })
+    )
+    expect(result.status).toBeUndefined()
+    expect(result.resolvedPathname).toBe('/_next/data/BUILD_ID/page.json')
+  })
+
+  it('invokes data requests matched through dynamic routes as data URLs', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/_next/data/BUILD_ID/blog/post.json'),
+        routes: {
+          ...emptyRoutes,
+          shouldNormalizeNextData: true,
+          dynamicRoutes: [
+            {
+              sourceRegex: '^/blog/(?<nxtPslug>[^/]+?)$',
+              destination: '/blog/[slug]?nxtPslug=$nxtPslug',
+            },
+          ],
+        },
+        pathnames: ['/blog/[slug]'],
+      })
+    )
+    expect(result.resolvedPathname).toBe('/blog/[slug]')
+    expect(result.invocationTarget?.pathname).toBe(
+      '/_next/data/BUILD_ID/blog/post.json'
+    )
+  })
+})
+
 describe('invocation', () => {
   it('reports params by name, decoded, with catch-all segments as arrays', async () => {
     const result = await resolveRoutes(

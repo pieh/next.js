@@ -54,6 +54,11 @@ export function denormalizeNextDataUrl(
       pathWithoutBase = pathname.slice(basePath.length)
     }
 
+    // with `trailingSlash` the page path ends in a slash, the data path never does
+    if (pathWithoutBase.length > 1 && pathWithoutBase.endsWith('/')) {
+      pathWithoutBase = pathWithoutBase.slice(0, -1)
+    }
+
     if (pathWithoutBase === '' || pathWithoutBase === '/') {
       pathWithoutBase = '/index'
     }
