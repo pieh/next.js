@@ -216,6 +216,7 @@ function processRoutes(
         setRewriteHeaders(
           previousUrl,
           currentUrl,
+          match.destination,
           requestHeaders,
           responseHeaders
         )
@@ -239,6 +240,7 @@ const NEXT_REWRITTEN_QUERY_HEADER = 'x-nextjs-rewritten-query'
 function setRewriteHeaders(
   before: URL,
   after: URL,
+  destination: string,
   requestHeaders: Headers,
   responseHeaders: Headers
 ) {
@@ -248,8 +250,16 @@ function setRewriteHeaders(
   if (before.pathname !== after.pathname) {
     responseHeaders.set(NEXT_REWRITTEN_PATH_HEADER, after.pathname)
   }
-  if (before.search !== after.search) {
-    responseHeaders.set(NEXT_REWRITTEN_QUERY_HEADER, after.search.slice(1))
+  // the query the rewrite adds, without Next's internal route params (like
+  // Vercel's routes): the request's own query, `_rsc` included, isn't part of it
+  const query = new URLSearchParams(destination.split('?')[1] ?? '')
+  for (const key of [...query.keys()]) {
+    if (key.startsWith('nxtP') || key.startsWith('nxtI')) {
+      query.delete(key)
+    }
+  }
+  if (query.size > 0) {
+    responseHeaders.set(NEXT_REWRITTEN_QUERY_HEADER, query.toString())
   }
 }
 
@@ -1569,6 +1579,7 @@ async function resolveRoutesWithIndex(
       setRewriteHeaders(
         previousUrl,
         currentUrl,
+        match.destination,
         currentRequestHeaders,
         currentResponseHeaders
       )

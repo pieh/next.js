@@ -532,6 +532,30 @@ describe('rewrite headers', () => {
     expect(result.resolvedHeaders?.get('x-nextjs-rewritten-query')).toBe('x=1')
   })
 
+  it('leaves the request query and internal route params out of the query header', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/photos/1?_rsc=abc'),
+        headers: new Headers({ rsc: '1', 'next-url': '/photos' }),
+        routes: {
+          ...emptyRoutes,
+          beforeFiles: [
+            {
+              sourceRegex: '^/photos/(?<nxtIid>[^/]+?)(?:/)?$',
+              destination: '/photos/(.)$nxtIid?nxtIid=$nxtIid',
+              has: [{ type: 'header', key: 'next-url', value: '/photos' }],
+            },
+          ],
+        },
+        pathnames: ['/photos/(.)[id]'],
+      })
+    )
+    expect(result.resolvedHeaders?.get('x-nextjs-rewritten-path')).toBe(
+      '/photos/(.)1'
+    )
+    expect(result.resolvedHeaders?.has('x-nextjs-rewritten-query')).toBe(false)
+  })
+
   it('does not set them for other requests', async () => {
     const result = await resolveRoutes(
       createBaseParams({
