@@ -1494,6 +1494,22 @@ async function resolveRoutesWithIndex(
     return resolveMatchedPathname(currentUrl, matchedPath)
   }
 
+  // `next start` checks a normalized data request as its page before dynamic
+  // routes: a page without a data route (automatically static,
+  // getInitialProps) wins over a dynamic route next to it
+  if (isDataUrl) {
+    const pageUrl = normalizeDataUrl(currentUrl, params)
+    const pagePath = matchesPathnameWithLocaleFallback({
+      pathname: pageUrl.pathname,
+      pathnames,
+      basePath,
+      i18n,
+    })
+    if (pagePath && !isDynamicTemplatePathname(pagePath)) {
+      return resolveMatchedPathname(pageUrl, pagePath)
+    }
+  }
+
   // Normalize again before processing afterFiles if this was originally a data URL
   if (isDataUrl) {
     currentUrl = normalizeDataUrl(currentUrl, params)

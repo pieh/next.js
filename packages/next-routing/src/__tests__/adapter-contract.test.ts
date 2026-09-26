@@ -238,6 +238,33 @@ describe('data requests', () => {
     expect(urls).toEqual(['/test'])
   })
 
+  it('matches a page without a data route before a dynamic route, like next start', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL(
+          'https://example.com/_next/data/BUILD_ID/hooks/pushed.json'
+        ),
+        headers: new Headers({ 'x-nextjs-data': '1' }),
+        routes: {
+          ...emptyRoutes,
+          middlewareMatchers: [{ sourceRegex: '^.*$' }],
+          dynamicRoutes: [
+            {
+              sourceRegex:
+                '^/_next/data/BUILD_ID/hooks/(?<nxtPid>[^/]+?)\\.json$',
+              destination: '/hooks/[id]?nxtPid=$nxtPid',
+            },
+          ],
+        },
+        pathnames: [
+          { pathname: '/hooks/pushed', type: 'STATIC_FILE' },
+          { pathname: '/hooks/[id]', type: 'STATIC_FILE' },
+        ],
+      })
+    )
+    expect(result.resolvedPathname).toBe('/hooks/pushed')
+  })
+
   it('invokes data requests matched through dynamic routes as data URLs', async () => {
     const result = await resolveRoutes(
       createBaseParams({
