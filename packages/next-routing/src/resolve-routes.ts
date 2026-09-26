@@ -294,7 +294,10 @@ function createPathnameIndex(
 function lookupPathname(
   pathname: string,
   index: PathnameIndex
-): RoutablePathname | { pathname: string; type?: undefined } | undefined {
+):
+  | RoutablePathname
+  | { pathname: string; type?: undefined; route?: undefined }
+  | undefined {
   const canonical = canonicalPathname(pathname)
   const direct = index.get(canonical)
   if (direct) {
@@ -711,16 +714,30 @@ function finalizeResult(
     return { resolvedHeaders: result.resolvedHeaders, status: result.status }
   }
 
-  const routeParams =
-    (result as InternalResult).params ??
-    (result.resolvedPathname &&
-    isDynamicTemplatePathname(result.resolvedPathname)
-      ? getRouteParams(
-          result.resolvedPathname,
-          result.invocationTarget.pathname,
-          { basePath, buildId, i18n }
-        )
-      : undefined)
+  const output = result.resolvedPathname
+    ? lookupPathname(result.resolvedPathname, index)
+    : undefined
+  // a typed output says which route it renders: its own pathname, or `route`
+  // for a prerender. Only untyped pathnames fall back to guessing from the
+  // dynamic route that matched, which also matches static pages next to it.
+  const route = output?.type ? (output.route ?? output.pathname) : undefined
+  const routeParams = output?.type
+    ? route && isDynamicTemplatePathname(route)
+      ? getRouteParams(route, result.invocationTarget.pathname, {
+          basePath,
+          buildId,
+          i18n,
+        })
+      : undefined
+    : ((result as InternalResult).params ??
+      (result.resolvedPathname &&
+      isDynamicTemplatePathname(result.resolvedPathname)
+        ? getRouteParams(
+            result.resolvedPathname,
+            result.invocationTarget.pathname,
+            { basePath, buildId, i18n }
+          )
+        : undefined))
 
   const locale = i18n
     ? getInvocationLocale(

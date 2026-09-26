@@ -577,6 +577,58 @@ describe('invocation', () => {
     expect(result.invocation?.requestMeta.locale).toBe('fr')
   })
 
+  it('reports no params for a static page next to a dynamic route', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/api/hello?a=b'),
+        routes: {
+          ...emptyRoutes,
+          dynamicRoutes: [
+            {
+              sourceRegex: '^/api/(?<nxtPid>[^/]+?)(?:/)?$',
+              destination: '/api/[id]?nxtPid=$nxtPid',
+            },
+          ],
+        },
+        pathnames: [
+          { pathname: '/api/hello', type: 'PAGES_API' },
+          { pathname: '/api/[id]', type: 'PAGES_API' },
+        ],
+      })
+    )
+    expect(result.resolvedPathname).toBe('/api/hello')
+    expect(result.invocation?.requestMeta.params).toBeUndefined()
+  })
+
+  it('reports params of the route for a root param shell', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/en/posts/two'),
+        routes: {
+          ...emptyRoutes,
+          dynamicRoutes: [
+            {
+              sourceRegex: '^/en/posts/(?<nxtPslug>[^/]+?)(?:/)?$',
+              destination: '/en/posts/[slug]?nxtPslug=$nxtPslug',
+            },
+          ],
+        },
+        pathnames: [
+          {
+            pathname: '/en/posts/[slug]',
+            type: 'PRERENDER',
+            route: '/[locale]/posts/[slug]',
+          },
+        ],
+      })
+    )
+    expect(result.resolvedPathname).toBe('/en/posts/[slug]')
+    expect(result.invocation?.requestMeta.params).toEqual({
+      locale: 'en',
+      slug: 'two',
+    })
+  })
+
   it('reports params for a concrete output of a dynamic page after a middleware rewrite', async () => {
     const result = await resolveRoutes(
       createBaseParams({

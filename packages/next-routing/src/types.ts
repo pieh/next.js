@@ -58,6 +58,13 @@ export type RoutablePathname = {
    * `public/` files, which are not adapter outputs, are `STATIC_FILE`.
    */
   type: RoutablePathnameType
+  /**
+   * The route the output renders, with its dynamic segments (`PRERENDER.route`
+   * in the adapter output, a page's own pathname), when it differs from
+   * `pathname`: a root param shell `/en/posts/[slug]` of
+   * `/[locale]/posts/[slug]`. Params are matched against it.
+   */
+  route?: string
 }
 
 export type ResolveRoutesParams = {
