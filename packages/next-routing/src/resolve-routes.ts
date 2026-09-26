@@ -275,17 +275,22 @@ function createPathnameIndex(
   basePath: string
 ): PathnameIndex {
   const index: PathnameIndex = new Map()
+  // an output keyed `/` itself (a prerender of the root) wins over the
+  // `/index` alias, whatever the order
+  let rootIsAlias = false
+  const root = basePath || '/'
   for (const entry of pathnames) {
     const output = typeof entry === 'string' ? { pathname: entry } : entry
     const key = canonicalPathname(output.pathname)
-    if (!index.has(key)) {
+    if (!index.has(key) || (key === root && rootIsAlias)) {
       index.set(key, output)
-    }
-    if (key === `${basePath}/index`) {
-      const root = basePath || '/'
-      if (!index.has(root)) {
-        index.set(root, output)
+      if (key === root) {
+        rootIsAlias = false
       }
+    }
+    if (key === `${basePath}/index` && !index.has(root)) {
+      index.set(root, output)
+      rootIsAlias = true
     }
   }
   return index

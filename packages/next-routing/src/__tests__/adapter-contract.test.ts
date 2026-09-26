@@ -94,6 +94,19 @@ describe('output matching like next start', () => {
     expect(withBasePath.resolvedPathname).toBe('/base/index')
   })
 
+  it('prefers an output keyed / over the /index alias', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/'),
+        pathnames: [
+          { pathname: '/index', type: 'PAGES' },
+          { pathname: '/', type: 'PRERENDER' },
+        ],
+      })
+    )
+    expect(result.resolvedPathname).toBe('/')
+  })
+
   it('prefers an output over a dynamic route after an afterFiles rewrite', async () => {
     const result = await resolveRoutes(
       createBaseParams({
