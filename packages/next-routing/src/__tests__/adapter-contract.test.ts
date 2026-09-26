@@ -598,6 +598,30 @@ describe('invocation', () => {
     expect(result.invocation?.requestMeta.locale).toBe('fr')
   })
 
+  it('targets a static file without the locale a middleware rewrite added', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/_next/static/chunks/a.js?dpl=x'),
+        i18n,
+        routes: {
+          ...emptyRoutes,
+          middlewareMatchers: [{ sourceRegex: '^.*$' }],
+        },
+        pathnames: [
+          { pathname: '/_next/static/chunks/a.js', type: 'STATIC_FILE' },
+        ],
+        invokeMiddleware: async (ctx) => ({
+          rewrite: new URL('/en/_next/static/chunks/a.js?dpl=x', ctx.url),
+        }),
+      })
+    )
+    expect(result.resolvedPathname).toBe('/_next/static/chunks/a.js')
+    expect(result.invocationTarget).toEqual({
+      pathname: '/_next/static/chunks/a.js',
+      query: { dpl: 'x' },
+    })
+  })
+
   it('reports no params for a static page next to a dynamic route', async () => {
     const result = await resolveRoutes(
       createBaseParams({

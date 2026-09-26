@@ -718,6 +718,28 @@ function finalizeResult(
   const output = result.resolvedPathname
     ? lookupPathname(result.resolvedPathname, index)
     : undefined
+
+  // Next's middleware adapter localizes internal rewrite targets
+  // (`/en/_next/static/chunks/x.js`) and `fsChecker` finds files with the
+  // locale normalized away. Static files are never keyed by locale, so point
+  // the target at the file itself: it's what a CDN serves it by.
+  if (
+    i18n &&
+    output?.type === 'STATIC_FILE' &&
+    canonicalPathname(result.invocationTarget.pathname) !==
+      canonicalPathname(output.pathname) &&
+    getPathnameLocale(result.invocationTarget.pathname, {
+      basePath,
+      buildId,
+      i18n,
+    })
+  ) {
+    result.invocationTarget = {
+      ...result.invocationTarget,
+      pathname: output.pathname,
+    }
+  }
+
   // a typed output says which route it renders: its own pathname, or `route`
   // for a prerender. Only untyped pathnames fall back to guessing from the
   // dynamic route that matched, which also matches static pages next to it.
