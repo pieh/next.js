@@ -1130,6 +1130,8 @@ async function resolveRoutesWithIndex(
   const initialOrigin = initialUrl.origin
   // the locale added for routing to a request that named none
   let routingLocale: string | undefined
+  // the request's locale, explicit or default, for rewrite targets without one
+  let requestLocale: string | undefined
   let middlewareRewriteUrl: URL | undefined
 
   // Data URLs are routed as their page path when there is middleware, like
@@ -1179,6 +1181,7 @@ async function resolveRoutesWithIndex(
 
       // Determine target locale if locale detection is enabled
       let targetLocale = pathLocaleResult.detectedLocale || defaultLocale
+      requestLocale = targetLocale
 
       // Match Next.js behavior: preferred-locale auto-detection redirects only
       // on index requests, not on arbitrary non-locale pathnames. Data requests
@@ -1368,6 +1371,24 @@ async function resolveRoutesWithIndex(
           externalRewrite: currentUrl,
           resolvedHeaders: currentResponseHeaders,
           status: currentStatus,
+        }
+      }
+
+      // Next's middleware adapter leaves some internal rewrite targets without
+      // a locale (`/api/...`), while i18n dynamic routes expect one: localize it
+      // like the request itself was
+      if (i18n && requestLocale && !isDataUrl) {
+        const rest =
+          basePath && currentUrl.pathname.startsWith(basePath)
+            ? currentUrl.pathname.slice(basePath.length) || '/'
+            : currentUrl.pathname
+        if (
+          !rest.startsWith('/_next/') &&
+          !normalizeLocalePath(rest, i18n.locales).detectedLocale
+        ) {
+          currentUrl = new URL(currentUrl.toString())
+          currentUrl.pathname = `${basePath}/${requestLocale}${rest === '/' ? '' : rest}`
+          routingLocale = requestLocale
         }
       }
     }

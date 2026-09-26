@@ -598,6 +598,34 @@ describe('invocation', () => {
     expect(result.invocation?.requestMeta.locale).toBe('fr')
   })
 
+  it('localizes a middleware rewrite target without a locale for dynamic routes', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/fr/foo/bar'),
+        i18n,
+        routes: {
+          ...emptyRoutes,
+          middlewareMatchers: [{ sourceRegex: '^.*$' }],
+          dynamicRoutes: [
+            {
+              sourceRegex:
+                '^[/]?(?<nextLocale>[^/]{1,})/api/proxy(?:/(?<nxtPslug>.+?))?(?:/)?$',
+              destination:
+                '/$nextLocale/api/proxy/[[...slug]]?nxtPslug=$nxtPslug',
+            },
+          ],
+        },
+        pathnames: [{ pathname: '/api/proxy/[[...slug]]', type: 'PAGES_API' }],
+        invokeMiddleware: async (ctx) => ({
+          rewrite: new URL('/api/proxy/bar', ctx.url),
+        }),
+      })
+    )
+    expect(result.resolvedPathname).toBe('/api/proxy/[[...slug]]')
+    expect(result.invocation?.requestMeta.params).toEqual({ slug: ['bar'] })
+    expect(result.invocation?.requestMeta.locale).toBe('fr')
+  })
+
   it('targets a static file without the locale a middleware rewrite added', async () => {
     const result = await resolveRoutes(
       createBaseParams({
