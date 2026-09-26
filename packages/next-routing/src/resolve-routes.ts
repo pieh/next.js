@@ -707,7 +707,8 @@ function finalizeResult(
     i18n &&
     state.explicitLocale &&
     result.resolvedPathname &&
-    isApiPathname(result.resolvedPathname, index, basePath)
+    isApiPathname(result.resolvedPathname, index, basePath) &&
+    isRequestedApiPathname(url.pathname, basePath, i18n)
   ) {
     // API routes are not localized: `next start` 404s an explicitly
     // locale-prefixed API request (`checkLocaleApi`)
@@ -802,6 +803,24 @@ function getInvocation(
     },
     headers,
   }
+}
+
+// a rewrite to an API route (`locale: false`) is fine, `checkLocaleApi` only
+// rejects the requested path itself
+function isRequestedApiPathname(
+  pathname: string,
+  basePath: string,
+  i18n: NonNullable<ResolveRoutesParams['i18n']>
+): boolean {
+  const withoutBasePath =
+    basePath && pathname.startsWith(basePath)
+      ? pathname.slice(basePath.length) || '/'
+      : pathname
+  const withoutLocale = normalizeLocalePath(
+    withoutBasePath,
+    i18n.locales
+  ).pathname
+  return withoutLocale === '/api' || withoutLocale.startsWith('/api/')
 }
 
 function isApiPathname(

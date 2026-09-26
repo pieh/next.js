@@ -323,6 +323,27 @@ describe('i18n like next start', () => {
     expect(result.invocationTarget).toBeUndefined()
   })
 
+  it('serves a locale-less rewrite of an explicitly localized request to an API route', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/en/rewrite-api/hello'),
+        i18n,
+        routes: {
+          ...emptyRoutes,
+          beforeFiles: [
+            {
+              sourceRegex:
+                '^/(?<locale>[^/]+?)/rewrite-api(?:/(?<path>.+?))?(?:/)?$',
+              destination: '/api/$path',
+            },
+          ],
+        },
+        pathnames: [{ pathname: '/api/hello', type: 'PAGES_API' }],
+      })
+    )
+    expect(result.resolvedPathname).toBe('/api/hello')
+  })
+
   it('serves the root for the default locale instead of redirecting', async () => {
     const removeTrailingSlash = {
       sourceRegex: '^(?:\\/((?:[^/]+\\/)*[^/]+))\\/$',
