@@ -710,6 +710,28 @@ describe('invocation', () => {
     expect(result.invocation?.requestMeta.params).toBeUndefined()
   })
 
+  it('leaves the locale out of the params of a root catch-all', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/about'),
+        i18n,
+        routes: {
+          ...emptyRoutes,
+          dynamicRoutes: [
+            {
+              sourceRegex:
+                '^[/]?(?<nextLocale>[^/]{1,})(?:/(?<nxtPslug>.+?))?(?:/)?$',
+              destination: '/$nextLocale/[[...slug]]?nxtPslug=$nxtPslug',
+            },
+          ],
+        },
+        pathnames: [{ pathname: '/[[...slug]]', type: 'PAGES' }],
+      })
+    )
+    expect(result.resolvedPathname).toBe('/[[...slug]]')
+    expect(result.invocation?.requestMeta.params).toEqual({ slug: ['about'] })
+  })
+
   it('reports params of the route for a root param shell', async () => {
     const result = await resolveRoutes(
       createBaseParams({

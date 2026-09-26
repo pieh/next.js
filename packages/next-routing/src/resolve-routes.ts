@@ -954,8 +954,10 @@ function getRouteParams(
       page,
       context.i18n.locales
     )
+    // routes are keyed without the locale: a root catch-all would take it as
+    // a param otherwise (`/en/about` is `slug: ['about']`)
     if (detectedLocale) {
-      candidates.push(withoutLocale)
+      candidates.unshift(withoutLocale)
     }
   }
   for (const candidate of candidates) {
