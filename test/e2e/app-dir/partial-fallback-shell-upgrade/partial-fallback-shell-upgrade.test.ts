@@ -7,6 +7,12 @@ import path from 'path'
 
 type NextInstance = ReturnType<typeof nextTestSetup>['next']
 
+// x-vercel-cache only exists on Vercel, which sets x-vercel-id on every
+// response. Other deploy targets skip the cache-status checks.
+function isVercelResponse(response: Response): boolean {
+  return response.headers.has('x-vercel-id')
+}
+
 function createSplitHTMLFetcher(next: NextInstance) {
   return async function fetchSplitHTML(pathname: string) {
     const response = await next.fetch(pathname)
@@ -297,7 +303,14 @@ describe('partial-fallback-shell-upgrade - partialPrefetching disabled', () => {
     if (isNextDeploy) {
       await retry(async () => {
         const cachedResult = await fetchSplitHTML('/blocking/c/foo')
-        expect(cachedResult.response.headers.get('x-vercel-cache')).toBe('HIT')
+        if (isVercelResponse(cachedResult.response)) {
+          expect(cachedResult.response.headers.get('x-vercel-cache')).toBe(
+            'HIT'
+          )
+        }
+        expect(cachedResult.static$('#one').attr('data-rendered-at')).toBe(
+          renderedAt
+        )
       })
     }
 
@@ -312,7 +325,7 @@ describe('partial-fallback-shell-upgrade - partialPrefetching disabled', () => {
     expect(secondResult.dynamicPart).toContain('<div id="two">bar</div>')
     expect(secondResult.dynamicPart).not.toContain('<div id="two">foo</div>')
 
-    if (isNextDeploy) {
+    if (isVercelResponse(secondResult.response)) {
       expect(secondResult.response.headers.get('x-vercel-cache')).toBe('HIT')
     }
   })
@@ -326,7 +339,11 @@ describe('partial-fallback-shell-upgrade - partialPrefetching disabled', () => {
     if (isNextDeploy) {
       await retry(async () => {
         const cachedResult = await fetchSplitHTML(pathname)
-        expect(cachedResult.response.headers.get('x-vercel-cache')).toBe('HIT')
+        if (isVercelResponse(cachedResult.response)) {
+          expect(cachedResult.response.headers.get('x-vercel-cache')).toBe(
+            'HIT'
+          )
+        }
         expect(cachedResult.static$('#one').attr('data-rendered-at')).toBe(
           firstRenderedAt
         )
@@ -367,7 +384,7 @@ describe('partial-fallback-shell-upgrade - partialPrefetching disabled', () => {
       expect(secondResult.dynamicPart).toContain('<div id="two">bar</div>')
       expect(secondResult.dynamicPart).not.toContain('<div id="two">foo</div>')
 
-      if (isNextDeploy) {
+      if (isVercelResponse(secondResult.response)) {
         expect(secondResult.response.headers.get('x-vercel-cache')).toBe('HIT')
       }
     })
@@ -425,7 +442,9 @@ describe('partial-fallback-shell-upgrade - partialPrefetching disabled', () => {
           const cachedResponse = await next.fetch(pathname)
           expect(cachedResponse.status).toBe(200)
           const cached$ = cheerio.load(await cachedResponse.text())
-          expect(cachedResponse.headers.get('x-vercel-cache')).toBe('HIT')
+          if (isVercelResponse(cachedResponse)) {
+            expect(cachedResponse.headers.get('x-vercel-cache')).toBe('HIT')
+          }
           expect(cached$('#optional').attr('data-rendered-at')).toBe(
             firstRenderedAt
           )
