@@ -5,6 +5,12 @@ import { computeCacheBustingSearchParam } from 'next/dist/shared/lib/router/util
 
 const isAdapterTest = process.env.NEXT_ENABLE_ADAPTER === '1'
 
+// x-vercel-cache only exists on Vercel, which sets x-vercel-id on every
+// response. Other deploy targets skip the cache-status checks.
+function isVercelResponse(response: Response): boolean {
+  return response.headers.has('x-vercel-id')
+}
+
 describe('middleware-static-rewrite', () => {
   const { next, isNextDeploy, isNextDev } = nextTestSetup({
     files: __dirname,
@@ -90,8 +96,10 @@ describe('middleware-static-rewrite', () => {
       expect(res.status).toBe(200)
 
       if (isNextDeploy) {
-        // We produced a partial fallback shell for rewrite/[slug], so we shouldn't see a cache HIT.
-        expect(getCacheHeader(res)).toMatch(/MISS|PRERENDER/)
+        if (isVercelResponse(res)) {
+          // We produced a partial fallback shell for rewrite/[slug], so we shouldn't see a cache HIT.
+          expect(getCacheHeader(res)).toMatch(/MISS|PRERENDER/)
+        }
       } else {
         expect(res.headers.get('x-nextjs-cache')).toBe(null)
       }
@@ -110,7 +118,9 @@ describe('middleware-static-rewrite', () => {
 
         expect(res.status).toBe(200)
         if (isNextDeploy) {
-          expect(getCacheHeader(res)).toBe('HIT')
+          if (isVercelResponse(res)) {
+            expect(getCacheHeader(res)).toBe('HIT')
+          }
         } else {
           expect(res.headers.get('x-nextjs-cache')).toBe('HIT')
         }
@@ -129,6 +139,12 @@ describe('middleware-static-rewrite', () => {
         expect($('[data-layout="/rewrite"]').data('sentinel')).toBe('runtime')
         expect($('[data-layout="/rewrite/[slug]"]').data('sentinel')).toBe(
           'runtime'
+        )
+
+        // Only a cached render serves the same timestamp twice.
+        const repeat$ = await next.render$('/not-broken')
+        expect(repeat$('[data-rewrite-slug]').attr('data-rendered-at')).toBe(
+          $('[data-rewrite-slug]').attr('data-rendered-at')
         )
       })
     })
@@ -224,7 +240,9 @@ describe('middleware-static-rewrite', () => {
       let res = await next.fetch('/not-broken')
 
       expect(res.status).toBe(200)
-      expect(getCacheHeader(res)).toMatch(/MISS|HIT|PRERENDER/)
+      if (!isNextDeploy || isVercelResponse(res)) {
+        expect(getCacheHeader(res)).toMatch(/MISS|HIT|PRERENDER/)
+      }
 
       let html = await res.text()
       let $ = cheerio.load(html)
@@ -234,16 +252,25 @@ describe('middleware-static-rewrite', () => {
       expect($('[data-layout="/rewrite/[slug]"]').data('sentinel')).toBe(
         'runtime'
       )
+      const renderedAt = $('[data-rewrite-slug]').attr('data-rendered-at')
 
       await retry(async () => {
         res = await next.fetch('/not-broken')
 
         expect(res.status).toBe(200)
-        expect(getCacheHeader(res)).toBe('HIT')
-      })
+        if (!isNextDeploy || isVercelResponse(res)) {
+          expect(getCacheHeader(res)).toBe('HIT')
+        }
 
-      html = await res.text()
-      $ = cheerio.load(html)
+        html = await res.text()
+        $ = cheerio.load(html)
+
+        // The blocking render that answered the first request is the one
+        // that got cached.
+        expect($('[data-rewrite-slug]').attr('data-rendered-at')).toBe(
+          renderedAt
+        )
+      })
 
       expect($('[data-rewrite-slug]').data('rewrite-slug')).toBe('not-broken')
 
