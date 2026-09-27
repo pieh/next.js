@@ -4,7 +4,11 @@ export default async function RewritePage({
   params: Promise<{ slug: string }>
 }) {
   const { slug } = await params
-  return <div data-rewrite-slug={slug}>Page /rewrite/{slug}</div>
+  return (
+    <div data-rewrite-slug={slug} data-rendered-at={performance.now()}>
+      Page /rewrite/{slug}
+    </div>
+  )
 }
 
 export async function generateStaticParams() {
