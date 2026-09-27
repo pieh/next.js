@@ -152,6 +152,8 @@ export type ResolveRoutesResult = {
   resolvedPathname?: string
   /**
    * Merged query produced by rewrite/middleware routing.
+   *
+   * @deprecated Use `invocation.requestMeta.query`.
    */
   resolvedQuery?: ResolveRoutesQuery
   /**
@@ -164,8 +166,10 @@ export type ResolveRoutesResult = {
   resolvedHeaders?: Headers
   status?: number
   /**
-   * Raw regex groups of the matched dynamic route. `invocation` carries the
-   * params a route module expects.
+   * Raw regex groups of the matched dynamic route.
+   *
+   * @deprecated Use `invocation.requestMeta.params`, the params a route module
+   * expects.
    */
   routeMatches?: Record<string, string>
   /**
