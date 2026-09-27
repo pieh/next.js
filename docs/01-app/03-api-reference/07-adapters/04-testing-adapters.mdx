@@ -151,6 +151,8 @@ The deploy script must follow this contract:
 
 Because the deploy script and logs script run as separate processes, any data you want to use later, such as build IDs or server logs, should be persisted to files inside the working directory.
 
+Some test fixtures configure their own `cacheHandler` unless the platform provides one. If your platform provides a cache handler, set `PLATFORM_PROVIDES_CACHE_HANDLER=1` in the environment of the build, so those fixtures use it.
+
 Example deploy script:
 
 ```bash filename="scripts/e2e-deploy.sh"
