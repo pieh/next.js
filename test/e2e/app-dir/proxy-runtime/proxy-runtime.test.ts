@@ -64,6 +64,9 @@ function getBuildError(cliOutput: string): string {
       if (line) {
         lines.push(line)
       }
+      // The stack line ends the compiler's output. A deployment's build log
+      // may continue with the provider's own lines.
+      if (line.startsWith('at ')) break
     } else if (line.includes('Build error occurred')) {
       capturing = true
     }
