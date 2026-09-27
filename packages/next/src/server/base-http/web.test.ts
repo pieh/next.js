@@ -1,4 +1,21 @@
-import { WebNextResponse } from './web'
+import { NextRequestHint } from '../web/adapter'
+import { getRequestMeta, setRequestMeta } from '../request-meta'
+import { WebNextRequest, WebNextResponse } from './web'
+
+describe('WebNextRequest', () => {
+  it('keeps the request meta of the request it wraps', () => {
+    const request = new NextRequestHint({
+      page: '/',
+      input: 'https://example.com/page',
+      init: {},
+    })
+    setRequestMeta(request, { initURL: 'https://example.com/page' })
+
+    expect(getRequestMeta(new WebNextRequest(request), 'initURL')).toBe(
+      'https://example.com/page'
+    )
+  })
+})
 
 describe('WebNextResponse onClose', () => {
   it('stream body', async () => {
