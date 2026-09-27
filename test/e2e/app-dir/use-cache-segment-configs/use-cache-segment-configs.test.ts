@@ -198,6 +198,16 @@ function getBuildOutput(cliOutput: string, isNextDeploy: boolean): string {
       } else {
         lines.push(stripAnsi(line))
       }
+      // The last line of the compiler's output. A deployment's build log may
+      // continue with the provider's own lines.
+      if (
+        isNextDeploy &&
+        /^\s*(at ignore-listed frames|> Build failed because of (Rspack|webpack) errors)\s*$/.test(
+          stripAnsi(line)
+        )
+      ) {
+        break
+      }
     } else if (
       line.includes('Build error occurred') ||
       line.includes('Failed to compile')
