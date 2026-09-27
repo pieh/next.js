@@ -111,3 +111,37 @@ requestMeta.onCacheEntryV2 callback
   '-- return false: continue normal Next.js response flow
       return true:  adapter already handled response (short-circuit)
 ```
+
+Store the HTML from the cache entry, not the bytes of the handler's response. In minimal mode the response is what Next.js expects to send after a shell your platform already served, so it isn't only the shell. For example, in test builds it starts with a PPR boundary marker.
+
+## 4. Regenerate a stale shell
+
+The seeded entry carries `initialRevalidate` and `initialExpiration`. A resume never regenerates the shell: it renders only the postponed parts, and its cache entry has no key and `revalidate: 0`. When the shell is stale, keep serving it and invoke the handler again **without** `postponed` (in the background, with `waitUntil`). That render produces a new shell and postponed state through `onCacheEntryV2`, with the revalidate time to use next.
+
+## 5. RSC requests and segment prefetches
+
+A PPR page's other outputs in the same prerender group need their own handling:
+
+- An RSC navigation request (the `rsc: 1` header) to a PPR page is a resume on its own: invoke the handler with `postponed` and the output's `pprChain` headers. Its response is the complete RSC payload, with nothing to prepend.
+- A segment prefetch (`next-router-prefetch: 1` with `next-router-segment-prefetch`) is served from its prerender output (`<page>.segments/<segment>.segment.rsc`) as is. A prefetch is never resumed.
+- A prefetch without a matching segment output gets the page's full RSC payload.
+
+## 6. Partial fallback shells
+
+With [Partial Prefetching](/docs/app/api-reference/config/next-config-js/partialPrefetching) enabled, a dynamic route's fallback prerender (for example `/blog/[slug]`) is marked with `config.partialFallback`. `config.allowQuery` lists the params that are part of its cache key: those `generateStaticParams` can provide. Params without `generateStaticParams` never are, so every value of them shares one entry.
+
+For a path that has no entry yet:
+
+1. Serve the fallback shell: resume it for HTML requests, and serve its segment outputs to segment prefetches. The client router treats a prefetch of a fallback as not yet available and retries it later.
+2. In the background, invoke the concrete path without `postponed`. Next.js renders it with the params outside `allowQuery` still deferred, so the result is a shell for the `allowQuery` params (for example `/prefix/c/[two]` for `/prefix/c/foo`), not a page for the concrete path.
+3. Store the result under the key of the `allowQuery` params, and serve it to later requests for any path with the same values.
+
+Crawlers should get the page rendered instead of the fallback, matching Next.js: Next.js checks the `user-agent` against `htmlLimitedBots` and a built-in pattern for Googlebot.
+
+## 7. Server Actions on PPR pages
+
+A Server Action on a PPR page (a `POST` matching the output's `config.bypassFor`) re-renders the page. Invoke it with the page's stored `postponed` state as `requestMeta.postponed`, so the re-render uses the resume data cache of the static shell and its data stays consistent with it.
+
+## 8. Error pages
+
+A prerendered not-found page that uses PPR (for example an app `not-found.js` with a Suspense boundary under `cacheComponents`) is served like any PPR page: stream its shell and resume its postponed state. Rendering it with `render404` or by invoking its output without `postponed` returns only the static shell. See [Caching not-found responses](/docs/app/api-reference/adapters/runtime-integration#caching-not-found-responses).

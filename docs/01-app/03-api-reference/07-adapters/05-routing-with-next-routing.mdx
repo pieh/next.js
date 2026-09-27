@@ -51,3 +51,16 @@ if (result.resolvedPathname) {
 - `routeMatches`: A record of named matches extracted from dynamic route segments.
 
 For example, if `/blog/post-1?draft=1` matches `/blog/[slug]?slug=post-1`, `resolvedPathname` is `/blog/[slug]` while `invocationTarget.pathname` is `/blog/post-1`.
+
+## Matching the result to outputs
+
+`resolvedPathname` keeps the spelling of the request, while outputs are keyed by the canonical form of their path. Before looking an output up, normalize the pathname the way `next start` does when it checks the filesystem:
+
+- Remove the trailing slash, also with `trailingSlash: true`: outputs are keyed without it.
+- Percent-decode it: `/caf%C3%A9` is served by the `/café` output.
+- The Pages Router root page is keyed `/index`.
+- A Pages Router data request (`/_next/data/<buildId>/<page>.json`) is served by the output of `<page>`, invoked with the `x-nextjs-data: 1` header. See [Invoking Entrypoints](/docs/app/api-reference/adapters/invoking-entrypoints#data-requests).
+
+`routeMatches` contains the raw groups of the matched regular expressions, not route params: don't pass them to a dynamic page as `params`. Derive params from the matched route instead, decoded, with catch-all segments as arrays.
+
+After routing, invoke the entrypoint with the request's own URL and pass the routing result as request meta (`query`, `params`, `locale`), rather than invoking `invocationTarget`. See [Request URL and request meta](/docs/app/api-reference/adapters/invoking-entrypoints#request-url-and-request-meta).

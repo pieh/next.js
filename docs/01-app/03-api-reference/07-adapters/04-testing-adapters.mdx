@@ -139,6 +139,8 @@ The test harness looks for these environment variables:
 - `NEXT_TEST_DEPLOY_LOGS_SCRIPT_PATH`: Path to the executable that returns build and runtime logs for that deployment
 - `NEXT_TEST_CLEANUP_SCRIPT_PATH`: Path to the optional executable that tears the deployment down after the test run
 
+Set `NEXT_ENABLE_ADAPTER=1` as well. Tests and [test gates](https://github.com/vercel/next.js/blob/canary/test/lib/gate/README.md) use it to tell an adapter-based deployment from Vercel's legacy builder: without it, suites that only run for adapters are skipped, and some tests expect the legacy builder's behavior. With a custom deploy script it has no other effect.
+
 ## Custom deploy script contract
 
 The deploy script `NEXT_TEST_DEPLOY_SCRIPT_PATH` is executed with `cwd` set to the isolated temporary app created by the Next.js test harness.
@@ -220,6 +222,8 @@ fi
 
 One pattern is to have the deploy script write `.adapter-build.log` and `.adapter-server.log`, then have the logs script replay those files so the harness can extract the required markers. This is one option, each platform has different ways to get the logs.
 
+Some tests assert on the build output in these logs, for example a build error's code frame. They are written against Vercel's build logs, which have no color codes and no indentation. Strip both from the build log your script prints.
+
 ## Custom cleanup script contract
 
 The cleanup script `NEXT_TEST_CLEANUP_SCRIPT_PATH` is executed with `cwd` set to the isolated temporary app created by the Next.js test harness.
@@ -227,3 +231,12 @@ The cleanup script `NEXT_TEST_CLEANUP_SCRIPT_PATH` is executed with `cwd` set to
 Additionally it receives `NEXT_TEST_DIR` and `NEXT_TEST_DEPLOY_URL` as environment variables.
 
 The cleanup script can be used to clean up any resources created by the deploy script. It runs after the tests have completed.
+
+## Test fixtures
+
+Fixtures are written for deploying to Vercel, and some rely on it:
+
+- A fixture whose `distDir` is outside `.next` declares where it is in `vercel.json` as `outputDirectory`. Use it as the publish directory.
+- `workspace:*` dependencies (such as `@next/mdx` or `@next/third-parties`) are resolved to `NEXT_TEST_VERSION`. When that points at a packed `next` tarball, install those packages from the registry at the same version instead.
+- The `next` package in the repository lists no `@next/swc-*` binaries as dependencies; a release adds them. A `next` you pack yourself without building `next-swc` from source needs them added, at the version of a published release.
+- Some fixtures read Vercel's environment, like `VERCEL_URL` for the deployment's own URL, and some tests assert on `x-vercel-cache`. Tests that check cache status should check behavior, or use `getCacheHeader` from `next-test-utils`, which also reads `x-nextjs-cache`.

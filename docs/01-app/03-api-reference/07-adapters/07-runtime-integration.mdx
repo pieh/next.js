@@ -17,6 +17,48 @@ When invoking entrypoints, adapters pass a `ctx` object to the Next.js handler. 
 - **`ctx.waitUntil`**: a function that accepts a promise. Use this to keep the serverless function alive after the response is sent, allowing background work like cache revalidation to complete.
 - **`requestMeta.onCacheEntryV2`** (set via `addRequestMeta`): a callback that fires when a cache entry is generated or looked up. Use this to observe all cache operations (not just PPR) and propagate cache updates to your platform's storage backend. This callback fires on the instance that handled the request. For multi-instance deployments, your adapter should propagate updates to shared storage. See [How Revalidation Works](/docs/app/guides/how-revalidation-works) for coordination patterns.
 
+## Providing cache handlers from an adapter
+
+`cacheHandler` and `cacheHandlers` in `next.config.js` are paths, and Next.js traces them into the deployment relative to the app's [`outputFileTracingRoot`](/docs/app/api-reference/config/next-config-js/output). A handler that ships with an adapter installed outside the app can't be traced from there. Instead, register handlers at runtime, before the first request, on the global Next.js reads them from:
+
+```ts filename="adapter-runtime.ts"
+const cacheHandlersSymbol = Symbol.for('@next/cache-handlers')
+
+globalThis[cacheHandlersSymbol] = {
+  ...globalThis[cacheHandlersSymbol],
+  // used by the incremental cache when no `cacheHandler` is configured
+  FetchCache: MyIncrementalCacheHandler,
+  // `'use cache'` and `'use cache: remote'`
+  DefaultCache: myDefaultUseCacheHandler,
+  RemoteCache: myRemoteUseCacheHandler,
+}
+```
+
+A `cacheHandler` or `cacheHandlers` entry that the app configures takes precedence over these.
+
+> **Good to know:** The built-in `'use cache: remote'` handler keeps entries in the memory of the instance that created them. A platform with more than one instance needs its own `RemoteCache` for them to be shared.
+
+## Serving from a platform cache (minimal mode)
+
+With `requestMeta.minimalMode` set, Next.js assumes a platform cache in front of it serves prerendered responses, and only renders what it is asked to:
+
+- It does not read or write page and route responses through `cacheHandler`, so the incremental cache only holds `FETCH` entries (`fetch` with `next.revalidate` or `next.tags`, and `unstable_cache`). The adapter stores responses itself, for example from `onCacheEntryV2`.
+- Responses keep their cache tags in the `x-next-cache-tags` header, for the platform to key invalidation on, and don't carry `x-nextjs-cache`.
+- Prerender fallbacks and PPR shells are served by the platform, not rendered on demand. A PPR page rendered without `postponed` returns its static shell.
+- Rendered responses are kept in memory per `x-invocation-id`. See [Invoking Entrypoints](/docs/app/api-reference/adapters/invoking-entrypoints#x-invocation-id).
+
+The outputs in a prerender group (the same `groupId`: HTML, RSC, segment prefetches, `_next/data`) revalidate together. To regenerate a group, invoke its primary output first and then the other outputs, all with the same `x-invocation-id`, so that one render serves all of them. Store the primary output's HTML from the `APP_PAGE` cache entry rather than from the response bytes. See [Implementing PPR in an Adapter](/docs/app/api-reference/adapters/implementing-ppr-in-an-adapter).
+
+## Caching not-found responses
+
+A 404 is cacheable when the render that produced it is prerenderable, with the cache lifetime of whatever produced it:
+
+- For an unmatched path, serve the prerendered not-found page (`/_not-found`, or Pages Router `/404`) from its prerender output, with that output's cache control. Rendering the page instead returns `revalidate: 0`: Next.js marks every 404 page render uncacheable unless the route that returned `notFound` provided a revalidate time.
+- For `getStaticProps` returning `notFound`, use the route's revalidate time.
+- A 404 from `getServerSideProps`, from a dynamic App Router page, or from a not-found page that reads request data is not cacheable.
+
+For a prerendered not-found page that uses Partial Prerendering, resume its postponed state like any other PPR page. Rendering it directly in minimal mode returns only its static shell.
+
 <AppOnly>
 
 ## PPR Chain Headers

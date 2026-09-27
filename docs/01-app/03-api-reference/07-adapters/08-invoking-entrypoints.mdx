@@ -48,6 +48,37 @@ Relevant files in the Next.js core:
 - [`packages/next/src/build/templates/app-route.ts`](https://github.com/vercel/next.js/blob/canary/packages/next/src/build/templates/app-route.ts)
 - and [`packages/next/src/build/templates/pages-api.ts`](https://github.com/vercel/next.js/blob/canary/packages/next/src/build/templates/pages-api.ts)
 
+## Request URL and request meta
+
+Route modules expect the request as the client sent it, with the result of routing passed separately. Invoke an entrypoint with:
+
+- `req.url` set to the requested path and query, not to the rewrite destination. Invoking with the destination (for example `invocationTarget` from [`@next/routing`](/docs/app/api-reference/adapters/routing-with-next-routing)) renders the wrong page for rewrites.
+- The rewrite result in request meta: `query` (the query after rewrites and middleware) and `params` (the route params, decoded, with catch-all segments as arrays).
+
+The following request meta fields change how an entrypoint behaves. Next.js reads them the same way on every request, so set each one the same way for every output type:
+
+| Field                | Purpose                                                                                                                                                                                                                                                                                        |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `initURL`            | The absolute URL of the request. Route modules build absolute URLs from it, for example the `fetch` a Server Action makes to render its redirect target. Without it they fall back to `http://localhost` (or the `host` header when `trustHostHeader` is set in `required-server-files.json`). |
+| `query`              | The query after rewrites and middleware.                                                                                                                                                                                                                                                       |
+| `params`             | The matched route's params.                                                                                                                                                                                                                                                                    |
+| `locale`             | The locale to render, including after a middleware rewrite to another locale.                                                                                                                                                                                                                  |
+| `relativeProjectDir` | The path from `process.cwd()` to the Next.js project directory.                                                                                                                                                                                                                                |
+| `hostname`           | The hostname route handlers use when constructing absolute URLs.                                                                                                                                                                                                                               |
+| `revalidate`         | A function Next.js calls for Pages Router `res.revalidate()` instead of making a network request.                                                                                                                                                                                              |
+| `render404`          | A function Next.js calls to render the 404 page for Pages Router `notFound: true`.                                                                                                                                                                                                             |
+| `postponed`          | The postponed state to resume a PPR render with. See [Implementing PPR in an Adapter](/docs/app/api-reference/adapters/implementing-ppr-in-an-adapter).                                                                                                                                        |
+| `onCacheEntryV2`     | A callback for the response cache entry the render looked up or generated. See [Runtime Integration](/docs/app/api-reference/adapters/runtime-integration).                                                                                                                                    |
+| `minimalMode`        | Serve responses for a platform cache in front of Next.js. See [Serving from a platform cache](/docs/app/api-reference/adapters/runtime-integration#serving-from-a-platform-cache-minimal-mode).                                                                                                |
+
+### Data requests
+
+Pages Router data requests (`/_next/data/<buildId>/<page>.json`) are marked by the `x-nextjs-data: 1` request header, which route modules and middleware read to return JSON instead of HTML. Set it on requests you invoke for a data URL, and only on those. `@next/routing` does not set it.
+
+### `x-invocation-id`
+
+With `minimalMode`, Next.js keeps rendered responses in an in-memory cache so that the variants of a page requested within one invocation (for example HTML and RSC) share one render. The cache is scoped by the `x-invocation-id` request header. Without it, entries are reused across requests for 10 seconds, so a request can get a render made for another request. Send a unique `x-invocation-id` per incoming request, and the same one for all variants you render for it.
+
 ## Edge runtime (`runtime: 'edge'`) (deprecated)
 
 > The Edge Runtime is [deprecated](/docs/messages/edge-runtime-deprecated). New routes should use the Node.js runtime.
@@ -86,6 +117,16 @@ await handler(request, ctx)
 ```
 
 Use `edgeRuntime` instead of deriving registry keys or handler names from filenames.
+
+### Request meta for edge outputs
+
+Edge entrypoints read `ctx.requestMeta` like Node.js ones. Pass the request's absolute URL as `initURL`. The route params and rewrite query should be in the URL you invoke the output with (merged into its query), not in `query` or `params` request meta: an edge route module also reads `query` when building `getServerSideProps`'s `resolvedUrl`, so route params passed there show up in it.
+
+### Assets of edge outputs
+
+The `assets` of an edge output are keyed relative to the project's `distDir` (for example `.next`), not to the repository root as for Node.js outputs. Resolve them against `<repoRoot>/<distDir>`.
+
+Code that reads a file next to it with `fetch(new URL('./file', import.meta.url))` is compiled to a `fetch` of `blob:<asset name>`, where the name is a key of the output's `assets`. Next.js's own edge sandbox answers those requests from the asset files. An adapter that runs edge code in another runtime has to do the same, for example by replacing each `blob:<asset name>` reference in the bundle with a `data:` URL of the file.
 
 Relevant files in the Next.js core:
 
