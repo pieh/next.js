@@ -43,19 +43,19 @@ type NextInstance = ReturnType<typeof nextTestSetup>['next']
 //   PARTITION — prime one URL to steady state, then flip a single param to
 //   a never-seen value. A param excluded from the cache key must land on
 //   the SAME entry (identical badge values on the cached region; HIT on
-//   deployed infra). A param included in the key must land on a DIFFERENT
+//   Vercel). A param included in the key must land on a DIFFERENT
 //   entry (the response renders the flipped value, serves the fallback
-//   entry's generic shell where one exists, and on deployed infra is
+//   entry's generic shell where one exists, and on Vercel is
 //   PRERENDER or MISS — never HIT). The partition tests
 //   are also the seeding tests: sharing proves the primed traffic seeded
 //   the entry other URLs consume, separation proves it seeded nothing it
 //   shouldn't have.
 //
 // The tests are identical across self-hosted and deployed runs except for
-// inline `isNextDeploy` x-vercel-cache checks where the cache key itself is
+// inline x-vercel-cache checks (Vercel only) where the cache key itself is
 // the subject: empty entries serve zero distinguishing bytes, so entry
 // sharing and separation on empty-shell trees are directly provable on
-// deployed infra only.
+// Vercel only.
 //
 // These tests encode the DESIRED behavior for all modes and infra. They
 // were written against two bugs that land fixed alongside them: the
@@ -385,7 +385,7 @@ function readBadges(body: string): Record<string, string> {
   return out
 }
 
-// The x-vercel-cache statuses are deterministic for this fixture (deployed
+// The x-vercel-cache statuses are deterministic for this fixture (Vercel
 // infra only; every entry is built with `revalidate: false` so nothing ever
 // goes stale):
 //
@@ -433,6 +433,12 @@ function remainingPrerenderableBelow(
   )
 }
 
+// x-vercel-cache only exists on Vercel, which sets x-vercel-id on every
+// response. Other deploy targets skip the cache-status checks.
+function isVercelResponse(response: Response): boolean {
+  return response.headers.has('x-vercel-id')
+}
+
 function createDocumentFetcher(next: NextInstance) {
   return async function fetchDocument(pathname: string) {
     const response = await next.fetch(pathname)
@@ -451,7 +457,7 @@ function createDocumentFetcher(next: NextInstance) {
 // No deploy-specific incompatibility is documented.
 // @force-gate !deploy || adapter
 describe('cache-components-prerender-matrix', () => {
-  const { next, isNextDev, isNextDeploy } = nextTestSetup({
+  const { next, isNextDev } = nextTestSetup({
     files: __dirname,
   })
 
@@ -561,7 +567,7 @@ describe('cache-components-prerender-matrix', () => {
       // between the captures can't skew the comparison. Priming already
       // fetched this URL repeatedly, so its entry exists: HIT exactly.
       const primed = await fetchDocument(basePathname)
-      if (isNextDeploy) {
+      if (isVercelResponse(primed.response)) {
         expect(primed.response.headers.get('x-vercel-cache')).toBe('HIT')
       }
 
@@ -574,7 +580,7 @@ describe('cache-components-prerender-matrix', () => {
       const mutated = { ...base, [mutate]: uniqueValue(mutate) }
       const mutatedPathname = urlFor(route, mutated)
       const first = await fetchDocument(mutatedPathname)
-      if (isNextDeploy) {
+      if (isVercelResponse(first.response)) {
         expect(first.response.headers.get('x-vercel-cache')).toBe('HIT')
       }
 
@@ -631,7 +637,7 @@ describe('cache-components-prerender-matrix', () => {
       // when no fallback exists (MISS). A HIT here would mean the entries
       // wrongly collapsed. The mutated URL matches the same entry as the
       // base (the mutation only replaces fresh values with fresh values).
-      if (isNextDeploy) {
+      if (isVercelResponse(first.response)) {
         const expectedStatus = matchedEntryHasFallback(
           route,
           prerenderedThrough
@@ -678,7 +684,7 @@ describe('cache-components-prerender-matrix', () => {
 
           const first = await fetchDocument(pathname)
           if (
-            isNextDeploy &&
+            isVercelResponse(first.response) &&
             remainingPrerenderableBelow(route, prerenderedThrough) > 0
           ) {
             // This URL mints a never-seen cache key (its unresolved
