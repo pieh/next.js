@@ -7,6 +7,7 @@ import { createPromiseWithResolvers } from '../../shared/lib/promise-with-resolv
 import type { NextRequestHint } from '../web/adapter'
 import { CloseController, trackBodyConsumed } from '../web/web-on-close'
 import { InvariantError } from '../../shared/lib/invariant-error'
+import { getRequestMeta, setRequestMeta } from '../request-meta'
 
 export class WebNextRequest extends BaseNextRequest<ReadableStream | null> {
   public request: Request
@@ -23,6 +24,9 @@ export class WebNextRequest extends BaseNextRequest<ReadableStream | null> {
     )
     this.request = request
     this.fetchMetrics = request.fetchMetrics
+    // Keep the request meta the edge adapter set from the handler's `ctx.requestMeta`
+    // (`initURL`, say), which the route module reads from this request.
+    setRequestMeta(this, { ...getRequestMeta(request) })
 
     this.headers = {}
     for (const [name, value] of request.headers.entries()) {
