@@ -1381,6 +1381,10 @@ async function resolveRoutesWithIndex(
     if (middlewareResult.rewrite) {
       currentUrl = middlewareResult.rewrite
       middlewareRewriteUrl = middlewareResult.rewrite
+      // `next start` sets the middleware response's status before rendering the target
+      if (middlewareResult.status) {
+        currentStatus = middlewareResult.status
+      }
 
       // Check if it's an external rewrite
       if (currentUrl.origin !== initialOrigin) {

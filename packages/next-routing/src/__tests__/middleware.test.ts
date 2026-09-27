@@ -1,6 +1,20 @@
 import { responseToMiddlewareResult } from '../middleware'
 
 describe('responseToMiddlewareResult', () => {
+  it('keeps the status of a rewrite', () => {
+    const response = new Response(null, {
+      status: 404,
+      headers: { 'x-middleware-rewrite': 'https://example.com/_not-found' },
+    })
+    const result = responseToMiddlewareResult(
+      response,
+      new Headers(),
+      new URL('https://example.com/rewritten-not-found')
+    )
+    expect(result.rewrite?.pathname).toBe('/_not-found')
+    expect(result.status).toBe(404)
+  })
+
   describe('basic response handling', () => {
     it('should handle a simple response with no special headers', () => {
       const response = new Response(null, {

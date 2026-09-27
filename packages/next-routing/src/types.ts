@@ -37,6 +37,9 @@ export type MiddlewareResult = {
     status: number
   }
   rewrite?: URL
+  // a rewrite's own status, which the final response keeps like in `next start`
+  // (`NextResponse.rewrite(url, { status: 404 })`)
+  status?: number
 }
 
 /**

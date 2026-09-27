@@ -143,6 +143,9 @@ export function responseToMiddlewareResult(
     const value = middlewareHeaders['x-middleware-rewrite'] as string
     const destination = getRelativeURL(value, url.toString())
     responseHeaders.set('x-middleware-rewrite', destination)
+    if (response.status !== 200) {
+      result.status = response.status
+    }
 
     try {
       const rewriteUrl = new URL(destination, url)

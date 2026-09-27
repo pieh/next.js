@@ -177,6 +177,26 @@ describe('data requests', () => {
     expect(spoofed.resolvedHeaders?.get('location')).toBe('/page/')
   })
 
+  it('keeps the status of a middleware rewrite', async () => {
+    // `NextResponse.rewrite(new URL('/_not-found', request.url), { status: 404 })`
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/rewritten-not-found'),
+        routes: {
+          ...emptyRoutes,
+          middlewareMatchers: [{ sourceRegex: '^.*$' }],
+        },
+        pathnames: ['/_not-found'],
+        invokeMiddleware: async () => ({
+          rewrite: new URL('https://example.com/_not-found'),
+          status: 404,
+        }),
+      })
+    )
+    expect(result.resolvedPathname).toBe('/_not-found')
+    expect(result.status).toBe(404)
+  })
+
   it('denormalizes a slashed page path without a slash before .json', async () => {
     const result = await resolveRoutes(
       createBaseParams({
