@@ -671,7 +671,9 @@ describe('Redirect priority and precedence', () => {
     expect(middlewareMock).toHaveBeenCalledTimes(1)
     expect(result.status).toBe(308)
     expect(result.resolvedHeaders?.get('location')).toBe('/en')
-    expect(result.resolvedHeaders?.get('x-nested-header')).toBe('valid')
+    expect(result.middlewareResponseHeaders?.get('x-nested-header')).toBe(
+      'valid'
+    )
   })
 
   it('should preserve request query in location header redirects without destination', async () => {

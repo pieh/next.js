@@ -92,8 +92,10 @@ describe('resolveRoutes with i18n', () => {
       expect(invokeMiddleware).toHaveBeenCalledTimes(1)
       expect(result.redirect).toBeDefined()
       expect(result.redirect?.url.pathname).toBe('/fr')
-      expect(result.resolvedHeaders?.get('x-nested-header')).toBe('valid')
-      expect(result.resolvedHeaders?.get('x-append-me')).toBe('top')
+      expect(result.middlewareResponseHeaders?.get('x-nested-header')).toBe(
+        'valid'
+      )
+      expect(result.middlewareResponseHeaders?.get('x-append-me')).toBe('top')
     })
 
     it('should not redirect when locale matches default', async () => {

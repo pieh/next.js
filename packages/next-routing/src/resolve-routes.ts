@@ -676,6 +676,8 @@ type ResolveState = {
   requestHeaders: Headers
   // the request itself named a locale (as opposed to the default one added for routing)
   explicitLocale: boolean
+  // what middleware set on its response, see ResolveRoutesResult.middlewareResponseHeaders
+  middlewareResponseHeaders?: Headers
 }
 
 export async function resolveRoutes(
@@ -705,7 +707,13 @@ export async function resolveRoutes(
     explicitLocale: false,
   }
   const result = await resolveRoutesWithIndex(params, index, state)
-  return finalizeResult(result, params, index, state)
+  const finalized = finalizeResult(result, params, index, state)
+  return state.middlewareResponseHeaders && !finalized.middlewareResponded
+    ? {
+        ...finalized,
+        middlewareResponseHeaders: state.middlewareResponseHeaders,
+      }
+    : finalized
 }
 
 function finalizeResult(
@@ -1352,15 +1360,12 @@ async function resolveRoutesWithIndex(
       state.requestHeaders = currentRequestHeaders
     }
 
-    // Apply response headers from middleware
+    // Middleware's response headers are kept apart from the ones routing rules
+    // add (see ResolveRoutesResult.middlewareResponseHeaders)
     if (middlewareResult.responseHeaders) {
-      middlewareResult.responseHeaders.forEach((value, key) => {
-        if (key.toLowerCase() === 'set-cookie') {
-          currentResponseHeaders.append(key, value)
-        } else {
-          currentResponseHeaders.set(key, value)
-        }
-      })
+      state.middlewareResponseHeaders = new Headers(
+        middlewareResult.responseHeaders
+      )
     }
 
     // Handle middleware redirect
@@ -1368,7 +1373,8 @@ async function resolveRoutesWithIndex(
       if (!currentResponseHeaders.has('location')) {
         currentResponseHeaders.set(
           'Location',
-          middlewareResult.redirect.url.toString()
+          middlewareResult.responseHeaders?.get('location') ??
+            middlewareResult.redirect.url.toString()
         )
       }
       return {

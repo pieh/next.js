@@ -542,11 +542,14 @@ describe('resolveRoutes - invokeMiddleware', () => {
     const result = await resolveRoutes(params)
 
     expect(result.resolvedPathname).toBe('/test')
-    expect(result.resolvedHeaders?.get('x-response-header')).toBe(
+    expect(result.middlewareResponseHeaders?.get('x-response-header')).toBe(
       'response-value'
     )
-    expect(result.resolvedHeaders?.get('x-internal-header')).toBeNull()
-    expect(result.resolvedHeaders?.get('authorization')).toBeNull()
+    expect(result.resolvedHeaders?.get('x-response-header') ?? null).toBeNull()
+    expect(
+      result.middlewareResponseHeaders?.get('x-internal-header')
+    ).toBeNull()
+    expect(result.middlewareResponseHeaders?.get('authorization')).toBeNull()
   })
 
   it('should not return initial request headers in resolvedHeaders', async () => {

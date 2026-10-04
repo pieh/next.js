@@ -164,6 +164,14 @@ export type ResolveRoutesResult = {
    */
   invocationTarget?: RouteInvocationTarget
   resolvedHeaders?: Headers
+  /**
+   * The response headers middleware set, kept apart from `resolvedHeaders`
+   * (the headers routing rules, `headers()` in next.config, add). Middleware's
+   * are computed per request, so a response that is cached for others (a CDN
+   * entry) must not carry them: apply them after the cache, on each response,
+   * on top of `resolvedHeaders`.
+   */
+  middlewareResponseHeaders?: Headers
   status?: number
   /**
    * Raw regex groups of the matched dynamic route.

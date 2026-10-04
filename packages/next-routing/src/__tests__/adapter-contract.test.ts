@@ -888,3 +888,31 @@ describe('invocation', () => {
     })
   })
 })
+
+describe('middleware response headers', () => {
+  it('are returned apart from the headers routing rules add', async () => {
+    const result = await resolveRoutes(
+      createBaseParams({
+        url: new URL('https://example.com/page'),
+        pathnames: ['/page'],
+        routes: {
+          ...emptyRoutes,
+          beforeMiddleware: [
+            { sourceRegex: '^/page$', headers: { 'x-from-rule': 'rule' } },
+          ],
+          middlewareMatchers: [{ sourceRegex: '.*' }],
+        },
+        invokeMiddleware: async () => ({
+          responseHeaders: new Headers({ 'x-from-middleware': 'middleware' }),
+        }),
+      })
+    )
+    expect(result.resolvedPathname).toBe('/page')
+    expect(result.resolvedHeaders?.get('x-from-rule')).toBe('rule')
+    expect(result.resolvedHeaders?.has('x-from-middleware')).toBe(false)
+    expect(result.middlewareResponseHeaders?.get('x-from-middleware')).toBe(
+      'middleware'
+    )
+    expect(result.middlewareResponseHeaders?.has('x-from-rule')).toBe(false)
+  })
+})
