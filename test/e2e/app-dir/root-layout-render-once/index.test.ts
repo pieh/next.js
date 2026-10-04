@@ -6,11 +6,13 @@ describe('app-dir root layout render once', () => {
   })
 
   it('should only render root layout once', async () => {
+    // a deployed instance may have rendered the layout before (e.g. for a deploy
+    // preview screenshot), so count from the first value seen
     let $ = await next.render$('/render-once')
-    expect($('#counter').text()).toBe('0')
+    const start = Number($('#counter').text())
     $ = await next.render$('/render-once')
-    expect($('#counter').text()).toBe('1')
+    expect($('#counter').text()).toBe(String(start + 1))
     $ = await next.render$('/render-once')
-    expect($('#counter').text()).toBe('2')
+    expect($('#counter').text()).toBe(String(start + 2))
   })
 })
