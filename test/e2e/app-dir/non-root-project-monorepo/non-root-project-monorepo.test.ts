@@ -43,7 +43,10 @@ describe('non-root-project-monorepo', () => {
   function sourceFileUrl(file: string) {
     // Server bundles preserve the source path from the build environment.
     if (isNextDeploy) {
-      return new URL(file, 'file:///vercel/path0/apps/web/').href
+      const projectDirUrl =
+        next.cliOutput.match(/PROJECT_DIR_URL: (\S+)/)?.[1] ??
+        'file:///vercel/path0/apps/web/'
+      return new URL(file, projectDirUrl).href
     }
     // Turbopack expands Windows 8.3 names (e.g. RUNNER~1) in source paths.
     const testDir =
